@@ -1,0 +1,429 @@
+import { useState } from "react";
+import { 
+  Pencil, 
+  Trash2, 
+  ChevronDown, 
+  ChevronUp, 
+  Edit, 
+  LinkIcon 
+} from "lucide-react";
+import { formatDate } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { deleteEvent, deleteGrouping, updateGrouping } from "@/services/api";
+import { Event, Grouping, GroupingUpdateData } from "@/types";
+import GroupingStatus from "./GroupingStatus";
+
+interface EventCardProps {
+  event: Event;
+}
+
+export default function EventCard({ event }: EventCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [editingGroupingId, setEditingGroupingId] = useState<number | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [groupToDelete, setGroupToDelete] = useState<{
+    id: number;
+    type: "grouping" | "event";
+  } | null>(null);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const formSchema = z.object({
+    section: z.enum(["Left", "Center", "Right"]),
+    row: z.string().min(1, "Row is required"),
+    price: z.coerce.number().min(0, "Price must be a positive number"),
+    groupSize: z.coerce.number().min(1, "Group size must be at least 1"),
+    isAvailable: z.boolean(),
+    groupsFound: z.coerce.number().min(0, "Groups found must be a positive number"),
+  });
+
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      section: "Center",
+      row: "",
+      price: 0,
+      groupSize: 1,
+      isAvailable: true,
+      groupsFound: 0,
+    },
+  });
+
+  const groupingMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: GroupingUpdateData }) => 
+      updateGrouping(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      toast({
+        title: "Grouping updated successfully",
+        description: "The ticket grouping has been updated.",
+      });
+      setEditingGroupingId(null);
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to update grouping",
+        description: "Please try again later.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteGroupingMutation = useMutation({
+    mutationFn: (id: number) => deleteGrouping(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      toast({
+        title: "Grouping deleted successfully",
+        description: "The ticket grouping has been removed.",
+      });
+      setDeleteConfirmOpen(false);
+      setGroupToDelete(null);
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to delete grouping",
+        description: "Please try again later.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteEventMutation = useMutation({
+    mutationFn: (id: number) => deleteEvent(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      toast({
+        title: "Event deleted successfully",
+        description: "The event and all its groupings have been removed.",
+      });
+      setDeleteConfirmOpen(false);
+      setGroupToDelete(null);
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to delete event",
+        description: "Please try again later.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const startEditing = (grouping: Grouping) => {
+    setEditingGroupingId(grouping.id);
+    form.reset({
+      section: grouping.section as "Left" | "Center" | "Right",
+      row: grouping.row,
+      price: grouping.price,
+      groupSize: grouping.groupSize,
+      isAvailable: grouping.isAvailable === true,
+      groupsFound: grouping.groupsFound || 0,
+    });
+  };
+
+  const onSubmit = (values: z.infer<typeof formSchema>) => {
+    if (editingGroupingId) {
+      groupingMutation.mutate({
+        id: editingGroupingId,
+        data: values,
+      });
+    }
+  };
+
+  const confirmDelete = (id: number, type: "grouping" | "event") => {
+    setGroupToDelete({ id, type });
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDelete = () => {
+    if (!groupToDelete) return;
+
+    if (groupToDelete.type === "grouping") {
+      deleteGroupingMutation.mutate(groupToDelete.id);
+    } else {
+      deleteEventMutation.mutate(groupToDelete.id);
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditingGroupingId(null);
+    form.reset();
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden mb-4">
+      <div className="relative">
+        <div className="px-6 pt-6 pb-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {event.eventName}
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Added on {formatDate(event.dateCreated)}
+              </p>
+            </div>
+
+            <div className="flex space-x-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="rounded-full"
+              >
+                {isExpanded ? (
+                  <ChevronUp className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+                ) : (
+                  <ChevronDown className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-600 dark:text-red-400 rounded-full"
+                onClick={() => confirmDelete(event.id, 'event')}
+              >
+                <Trash2 className="h-5 w-5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className="px-6 py-4">
+            <div className="flex items-center mb-4">
+              <LinkIcon className="h-4 w-4 text-gray-500 dark:text-gray-400 mr-1" />
+              <a
+                href={event.eventUrl}
+                className="text-primary hover:underline text-sm"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {event.eventUrl}
+              </a>
+            </div>
+
+            <div className="flex overflow-x-auto pb-4 -mx-1 px-1">
+              <div className="flex gap-4 flex-nowrap">
+                {event.groupings.map((grouping) => (
+                  <div
+                    key={grouping.id}
+                    className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden w-[280px] flex-shrink-0"
+                  >
+                    {editingGroupingId === grouping.id ? (
+                      // Edit form
+                      <div className="p-3 space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label htmlFor="section">Section</Label>
+                            <Select
+                              defaultValue={grouping.section}
+                              onValueChange={(value) => form.setValue("section", value as "Left" | "Center" | "Right")}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select section" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Left">Left</SelectItem>
+                                <SelectItem value="Center">Center</SelectItem>
+                                <SelectItem value="Right">Right</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label htmlFor="row">Row</Label>
+                            <Input
+                              id="row"
+                              defaultValue={grouping.row}
+                              onChange={(e) => form.setValue("row", e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label htmlFor="price">Price ($)</Label>
+                            <Input
+                              id="price"
+                              type="number"
+                              defaultValue={grouping.price}
+                              onChange={(e) => form.setValue("price", parseFloat(e.target.value))}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="groupSize">Group Size</Label>
+                            <Input
+                              id="groupSize"
+                              type="number"
+                              defaultValue={grouping.groupSize}
+                              onChange={(e) => form.setValue("groupSize", parseInt(e.target.value))}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label htmlFor="isAvailable">Available</Label>
+                            <Select
+                              defaultValue={grouping.isAvailable ? "true" : "false"}
+                              onValueChange={(value) => form.setValue("isAvailable", value === "true")}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Availability" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="true">Yes</SelectItem>
+                                <SelectItem value="false">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label htmlFor="groupsFound">Groups Found</Label>
+                            <Input
+                              id="groupsFound"
+                              type="number"
+                              defaultValue={grouping.groupsFound || 0}
+                              onChange={(e) => form.setValue("groupsFound", parseInt(e.target.value))}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end space-x-2 mt-3">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={cancelEditing}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => onSubmit(form.getValues())}
+                            disabled={groupingMutation.isPending}
+                          >
+                            {groupingMutation.isPending ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      // Display view
+                      <div className="p-3">
+                        <div className="mb-3">
+                          <h4 className="font-medium text-gray-900 dark:text-gray-100 text-sm">
+                            {grouping.section} Section, Row {grouping.row}
+                          </h4>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-x-2 text-xs text-gray-500 dark:text-gray-400 mb-3">
+                          <div>
+                            <p className="font-semibold">Price</p>
+                            <p className="text-sm font-medium">${grouping.price}</p>
+                          </div>
+                          <div>
+                            <p className="font-semibold">Group Size</p>
+                            <p className="text-sm font-medium">{grouping.groupSize}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                          <GroupingStatus grouping={grouping} />
+                          
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-10 px-2 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-950"
+                              onClick={() => startEditing(grouping)}
+                            >
+                              <Edit className="h-3 w-3 mr-1.5" />
+                              <span className="text-xs font-medium">Edit</span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-10 px-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950"
+                              onClick={() => confirmDelete(grouping.id, 'grouping')}
+                            >
+                              <Trash2 className="h-3 w-3 mr-1.5" />
+                              <span className="text-xs font-medium">Delete</span>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center">Confirm Deletion</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-center">
+              {groupToDelete?.type === 'event' ? 
+                'Are you sure you want to delete this event and all its groupings?' : 
+                'Are you sure you want to delete this grouping?'}
+            </p>
+            <p className="text-center text-sm text-gray-500 mt-2">
+              This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter className="flex space-x-2 justify-center">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeleteConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDelete}
+              disabled={deleteGroupingMutation.isPending || deleteEventMutation.isPending}
+            >
+              {deleteGroupingMutation.isPending || deleteEventMutation.isPending ? 
+                "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
