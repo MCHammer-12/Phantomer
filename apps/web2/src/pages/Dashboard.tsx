@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { getEvents } from "@/services/api";
 import AppHeader from "@/components/AppHeader";
 import EventForm from "@/components/EventForm";
@@ -33,31 +32,28 @@ export default function Dashboard() {
   //one for errors
   const [error, setError] = useState<string | null>(null);
 
+  // Fetch events and update state
+  const fetchEvents = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const eventsArray = await getEvents();
+      setEvents(eventsArray);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // add useeffect to call async fetch function
   useEffect(() => {
-    async function fetchEvents() {
-      //isloading=true
-      setIsLoading(true);
-      //call getevents
-      try {
-        const eventsArray = await getEvents();
-        //on success call setevents
-        setEvents(eventsArray);
-        //on failure call seterror
-      } catch (err) {
-        setError((err as Error).message);
-         //set isloading to false
-      } finally {
-        setIsLoading(false);
-      }
-    }
     fetchEvents();
   }, []);
 
 
-  
   const handleRefresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+    await fetchEvents();
   };
 
   const handleSortChange = (value: string) => {

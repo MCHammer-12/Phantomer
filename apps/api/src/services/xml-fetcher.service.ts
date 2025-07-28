@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { XMLParser } from 'fast-xml-parser';
 import { PrismaClient } from '@prisma/client';
-
+import axios from 'axios';
 
 interface XmlZone {
   zone_color?: string;
@@ -47,30 +47,24 @@ export class XMLFetcherService {
     expectedPrice?: number
   ): Promise<void> {
     /* ───────────────────────── timeout guard ───────────────────────── */
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
 
     try {
-      this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId})`);
+      this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId}) Event URL: ${eventUrl}`);
       if (expectedPrice === undefined) {
         this.logger.error(`❌ Missing expectedPrice for event ${eventId} — all seats will fail price validation`);
       }
 
-      const response = await fetch(eventUrl, {
-        signal: controller.signal,
+      const response = await axios.get(eventUrl, {
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
           Accept: '*/*',
         },
+        timeout: 15000,
       });
-      clearTimeout(timeout);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      }
-
-      const xmlText = await response.text();
+      // Axios throws on non-2xx, so no need for response.ok check
+      const xmlText = response.data;
 
       /* ───────────────────────── parse XML ───────────────────────── */
       const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
@@ -255,10 +249,10 @@ export class XMLFetcherService {
       /* ─────────────── summary log only ─────────────── */
       this.logger.log(`Event ID ${eventId}: ${seatData.length} seats stored`);
     } catch (err: any) {
-      clearTimeout(timeout);
       this.logger.error(
         `Fetch failed for ${eventName}: ${err?.cause?.code ?? err.message}`
       );
+      this.logger.log({err})
     }
   }
 
@@ -279,10 +273,12 @@ export class XMLFetcherService {
       await this.prisma.eventSeat.createMany({ data: seatData });
   }
 
-
+  private isworking = false
 
   @Cron('*/12 * * * * *')
   async handleCron() {
+    if (this.isworking) return
+    this.isworking = true
     this.logger.log('Executing scheduled XML fetch…');
     const events = await this.prisma.event.findMany();
     for (const e of events) {
@@ -296,5 +292,7 @@ export class XMLFetcherService {
         e.expectedPrice || undefined
       );
     }
+    this.isworking = false
   }
 }
+
