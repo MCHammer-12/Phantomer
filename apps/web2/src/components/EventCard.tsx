@@ -29,9 +29,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 
 interface EventCardProps {
   event: Event;
+  onDelete: () => void;
 }
 
-export default function EventCard({ event }: EventCardProps) {
+export default function EventCard({ event, onDelete }: EventCardProps) {
   const { toast } = useToast();
   const [isExpanded, setIsExpanded] = useState(true);
   const [editingGroupingId, setEditingGroupingId] = useState<number | null>(null);
@@ -113,6 +114,7 @@ export default function EventCard({ event }: EventCardProps) {
         title: "Event deleted",
         description: "The event and all its groupings have been deleted successfully",
       });
+      onDelete();
     },
     onError: (error) => {
       toast({

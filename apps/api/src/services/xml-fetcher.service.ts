@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { XMLParser } from 'fast-xml-parser';
 import { PrismaClient } from '@prisma/client';
-import axios from 'axios';
+import { request } from 'playwright';
+import * as http2 from 'http2';
+import { TLSSocket } from 'tls';
+console.log('HTTP_PROXY=', process.env.HTTP_PROXY, 'HTTPS_PROXY=', process.env.HTTPS_PROXY);
 
 interface XmlZone {
   zone_color?: string;
@@ -46,7 +49,6 @@ export class XMLFetcherService {
     eventGroupSize?: number,
     expectedPrice?: number
   ): Promise<void> {
-    /* ───────────────────────── timeout guard ───────────────────────── */
 
     try {
       this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId}) Event URL: ${eventUrl}`);
@@ -54,17 +56,25 @@ export class XMLFetcherService {
         this.logger.error(`❌ Missing expectedPrice for event ${eventId} — all seats will fail price validation`);
       }
 
-      const response = await axios.get(eventUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-          Accept: '*/*',
-        },
-        timeout: 15000,
-      });
+      // Debug HTTP/2 negotiation
+      try {
+        const urlObj = new URL(eventUrl);
+        const session = http2.connect(urlObj.origin);
+        const tlsSocket = session.socket as TLSSocket;
+        this.logger.log('HTTP/2 ALPN protocol:', tlsSocket.alpnProtocol);
+        session.close();
+      } catch (err) {
+        this.logger.error('HTTP/2 session error:', err);
+      }
 
-      // Axios throws on non-2xx, so no need for response.ok check
-      const xmlText = response.data;
+      // Fetch XML using Playwright APIRequestContext over HTTP/2
+      const apiContext = await request.newContext();
+      const res = await apiContext.get(eventUrl, { timeout: 15000 });
+      if (res.status() !== 200) {
+        throw new Error(`Failed to fetch URL, HTTP ${res.status()}`);
+      }
+      const xmlText = await res.text();
+      await apiContext.dispose();
 
       /* ───────────────────────── parse XML ───────────────────────── */
       const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
@@ -275,11 +285,29 @@ export class XMLFetcherService {
 
   private isworking = false
 
-  @Cron('*/12 * * * * *')
-  async handleCron() {
-    if (this.isworking) return
-    this.isworking = true
-    this.logger.log('Executing scheduled XML fetch…');
+  // @Cron('*/12 * * * * *')
+  // async handleCron() {
+  //   if (this.isworking) return
+  //   this.isworking = true
+  //   this.logger.log('Executing scheduled XML fetch…');
+  //   const events = await this.prisma.event.findMany();
+  //   for (const e of events) {
+  //     await this.fetchAndStoreXML(
+  //       e.name,
+  //       e.sourceUrl,
+  //       e.id,
+  //       e.row || undefined,
+  //       e.section || undefined,
+  //       e.groupSize || undefined,
+  //       e.expectedPrice || undefined
+  //     );
+  //   }
+  //   this.isworking = false
+  // }
+  async runOnce() {
+    if (this.isworking) return;
+    this.isworking = true;
+    this.logger.log('Executing one-time XML fetch…');
     const events = await this.prisma.event.findMany();
     for (const e of events) {
       await this.fetchAndStoreXML(
@@ -292,7 +320,6 @@ export class XMLFetcherService {
         e.expectedPrice || undefined
       );
     }
-    this.isworking = false
+    this.isworking = false;
   }
 }
-

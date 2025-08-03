@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { EventFormData } from "@/types";
+import type { Section } from "@/types";
 import { useMutation } from "@tanstack/react-query";
 import { createEvent } from "@/services/api";
 import { queryClient } from "@/lib/queryClient";
@@ -23,7 +24,10 @@ const formSchema = z.object({
   eventName: z.string().min(1, "Event name is required"),
   eventUrl: z.string().url("Must be a valid URL"),
   row: z.string().min(1, "Row is required"),
-  section: z.string().min(1, "Section is required"),
+  section: z.enum(["Left", "Center", "Right"], {
+    required_error: "Section is required",
+    invalid_type_error: "Section must be Left, Center, or Right",
+  }),
   price: z.coerce
     .number()
     .positive("Price must be a positive number")
@@ -42,6 +46,7 @@ interface EventFormProps {
 
 export default function EventForm({ onSuccess }: EventFormProps) {
   const { toast } = useToast();
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [availableTags] = useState(["VIP", "Premium", "General", "Discount", "Limited"]);
   
   const form = useForm<z.infer<typeof formSchema>>({
@@ -50,7 +55,7 @@ export default function EventForm({ onSuccess }: EventFormProps) {
       eventName: "",
       eventUrl: "",
       row: "",
-      section: "",
+      section: "Left" as Section,
       price: undefined,
       groupSize: undefined,
       tag: undefined,
@@ -81,12 +86,25 @@ export default function EventForm({ onSuccess }: EventFormProps) {
   });
 
   function onSubmit(values: z.infer<typeof formSchema>) {
+    setUrlError(null);
+    const urlPattern = /^https:\/\/my\.arttix\.org\/api\/syos\/GetSeatList\?performanceId=\d+&facilityId=\d+&screenId=\d+$/;
+    if (!urlPattern.test(values.eventUrl)) {
+      setUrlError(
+        "Invalid URL – must be: https://my.arttix.org/api/syos/GetSeatList?performanceId=<id>&facilityId=<id>&screenId=<id>"
+      );
+      return;
+    }
     mutation.mutate(values);
   }
 
   return (
     <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 w-[300px] flex-shrink-0">
       <h2 className="text-lg font-semibold mb-4 dark:text-white">Add New Event</h2>
+      {urlError && (
+        <div className="text-red-500 text-sm mb-2">
+          {urlError}
+        </div>
+      )}
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
           <FormField

@@ -13,6 +13,8 @@ interface AppHeaderProps {
 
 export default function AppHeader({ onRefresh, isRefreshing, events }: AppHeaderProps) {
   const [lastUpdated, setLastUpdated] = useState<string>("Never");
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isRefreshing) {
@@ -27,7 +29,19 @@ export default function AppHeader({ onRefresh, isRefreshing, events }: AppHeader
   }, [isRefreshing]);
 
   const handleRefresh = async () => {
-    await onRefresh();
+    setSuccessMessage(null);
+    setErrorMessage(null);
+    try {
+      await onRefresh();
+      const time = new Date().toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      setSuccessMessage(`Events updated successfully`);
+    } catch (err: any) {
+      setErrorMessage(`Refresh failed: ${err.message}`);
+    }
   };
 
   return (
@@ -54,7 +68,18 @@ export default function AppHeader({ onRefresh, isRefreshing, events }: AppHeader
                 }`}
               />
             </Button>
-            
+            <div aria-live="polite" className="min-w-[8rem]">
+              {successMessage && (
+                <span role="status" className="text-green-600 text-sm">
+                  {successMessage}
+                </span>
+              )}
+              {errorMessage && (
+                <span role="alert" className="text-red-600 text-sm">
+                  {errorMessage}
+                </span>
+              )}
+            </div>
             <NotificationsPanel 
               events={events}
               isRefreshing={isRefreshing}

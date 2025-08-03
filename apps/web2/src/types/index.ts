@@ -1,3 +1,5 @@
+export type Section = "Left" | "Center" | "Right";
+
 export interface Event {
   id: number;
   eventName: string;
@@ -9,7 +11,7 @@ export interface Event {
 export interface Grouping {
   id: number;
   eventId: number;
-  section: "Left" | "Center" | "Right";
+  section: Section;
   row: string;
   price: number;
   groupSize: number;
@@ -21,7 +23,7 @@ export interface EventFormData {
   eventName: string;
   eventUrl: string;
   row: string;
-  section: string;
+  section: Section;
   price: number;
   groupSize: number;
   tag?: string;
@@ -38,7 +40,7 @@ export interface FilterOption {
 }
 
 export interface GroupingUpdateData {
-  section?: "Left" | "Center" | "Right";
+  section?: Section;
   row?: string;
   price?: number;
   groupSize?: number;

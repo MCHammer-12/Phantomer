@@ -8,6 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Event, FilterOption, SortOption } from "@/types";
 import { queryClient } from "@/lib/queryClient";
 import { FileText } from "lucide-react";
+import { API_URL } from '@/types/constants';
+
+// Trigger backend to refresh XML and update data
+async function refreshAllEvents(): Promise<void> {
+  const res = await fetch(`${API_URL}/events/refresh`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(`Refresh failed: ${res.status}`);
+  }
+}
 
 const sortOptions: SortOption[] = [
   { value: "dateCreated", label: "Sort by Date Created" },
@@ -53,7 +62,19 @@ export default function Dashboard() {
 
 
   const handleRefresh = async () => {
-    await fetchEvents();
+    setIsLoading(true);
+    setError(null);
+    try {
+      // First tell backend to fetch fresh XML
+      await refreshAllEvents();
+      // Then re-fetch the events list
+      await fetchEvents();
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSortChange = (value: string) => {
@@ -150,7 +171,7 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-6 custom-scrollbar overflow-y-auto max-h-[calc(100vh-220px)]">
                 {filteredEvents.map((event: Event) => (
-                  <EventCard key={event.id} event={event} />
+                  <EventCard key={event.id} event={event} onDelete={handleRefresh} />
                 ))}
               </div>
             )}

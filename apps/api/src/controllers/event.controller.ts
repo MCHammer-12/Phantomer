@@ -1,5 +1,5 @@
-// event.controller.ts
-import { Body, Controller, Post, Get } from '@nestjs/common';
+import { Body, Controller, Post, Get, Delete, Param } from '@nestjs/common';
+import { XMLFetcherService } from '../services/xml-fetcher.service';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient(); 
@@ -15,6 +15,8 @@ interface CreateEventDto {
 
 @Controller('events') 
 export class EventController {
+  constructor(private readonly xmlFetcherService: XMLFetcherService) {}
+  
   @Post('add') 
   async createEvent(@Body() body: CreateEventDto) {
     try {
@@ -22,9 +24,9 @@ export class EventController {
         data: { 
           name: body.name, 
           sourceUrl: body.url,
-          row: body.row,         // Save row
-          section: body.section, // Save section
-          groupSize: body.groupSize, // Save group size
+          row: body.row,
+          section: body.section,
+          groupSize: body.groupSize,
           expectedPrice: body.expectedPrice
         },
       });
@@ -35,14 +37,66 @@ export class EventController {
     }
   }
 
-  @Get('all') 
+  @Get('all')
   async getEvents() {
     try {
       const events = await prisma.event.findMany();
-      return { events };
+      const eventsWithGroupings = await Promise.all(
+        events.map(async (e) => {
+          const size = e.groupSize ?? 1;
+          const validSeatsCount = await prisma.eventSeat.count({
+            where: { eventId: e.id, isvalid: true },
+          });
+          const isAvailable =
+            size > 1 ? validSeatsCount >= size : validSeatsCount > 0;
+          const grouping = {
+            id: e.id,
+            section: e.section,
+            row: e.row,
+            price: e.expectedPrice,
+            groupSize: size,
+            isAvailable,
+          };
+          return {
+            id: e.id,
+            eventName: e.name,
+            eventUrl: e.sourceUrl,
+            dateCreated: e.createdAt,
+            groupings: [grouping],
+          };
+        })
+      );
+      return { events: eventsWithGroupings };
     } catch (error) {
       console.error('Error fetching events:', error);
       return { error: 'Failed to fetch events' };
     }
+  }
+  
+  @Post('refresh')
+  async refreshAll() {
+    await this.xmlFetcherService.runOnce();
+    return { message: 'Refresh triggered' };
+  }
+
+  @Delete(':id')
+  async deleteEvent(@Param('id') id: string) {
+    const eventId = parseInt(id, 10);
+    try {
+      // Delete dependent records first
+      await prisma.eventSeat.deleteMany({ where: { eventId } });
+      await prisma.eventZonePrice.deleteMany({ where: { eventId } });
+      // Then delete the event
+      await prisma.event.delete({ where: { id: eventId } });
+      return { message: 'Event deleted' };
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      return { error: 'Failed to delete event' };
+    }
+  }
+
+  @Delete('groupings/:id')
+  async deleteGrouping(@Param('id') id: string) {
+    return { message: 'Grouping deleted' };
   }
 }

@@ -1,4 +1,4 @@
-import { apiRequest } from "@/lib/queryClient";
+// import { apiRequest } from "@/lib/queryClient";
 import { Event, EventFormData, Grouping, GroupingUpdateData } from "@/types";
 import { API_URL } from "../types/constants";
 
@@ -29,20 +29,35 @@ export async function getEvents(): Promise<Event[]> {
   }));
 }
 
-export async function refreshEventStatus(eventId: number): Promise<Event> {
-  const response = await apiRequest("POST", `${API_BASE_URL}/events/${eventId}/refresh`, undefined);
-  return response.json();
+export async function refreshAllEvents(): Promise<void> {
+  const res = await fetch(`${API_URL}/refresh`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(`Failed to refresh events: ${res.status}`);
+  }
 }
 
 export async function updateGrouping(id: number, data: GroupingUpdateData): Promise<Grouping> {
-  const response = await apiRequest("PATCH", `${API_BASE_URL}/groupings/${id}`, data);
-  return response.json();
+  const res = await fetch(`${API_BASE_URL}/groupings/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update grouping: ${res.status}`);
+  }
+  return res.json();
 }
 
 export async function deleteGrouping(id: number): Promise<void> {
-  await apiRequest("DELETE", `${API_BASE_URL}/groupings/${id}`, undefined);
+  const res = await fetch(`${API_BASE_URL}/groupings/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    throw new Error(`Failed to delete grouping: ${res.status}`);
+  }
 }
 
 export async function deleteEvent(id: number): Promise<void> {
-  await apiRequest("DELETE", `${API_BASE_URL}/events/${id}`, undefined);
+  const res = await fetch(`${API_BASE_URL}/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    throw new Error(`Failed to delete event: ${res.status}`);
+  }
 }
