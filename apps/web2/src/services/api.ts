@@ -6,11 +6,23 @@ const API_BASE_URL = `${API_URL}/events`;
 
 export async function createEvent(data: EventFormData): Promise<Event> {
   const res = await fetch(`${API_URL}/events/add`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name:data.eventName, url:data.eventUrl, row:data.row, section:data.section, groupSize:data.groupSize, expectedPrice:data.price }),
-      });
-  return res.json();
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: data.eventName,
+      url: data.eventUrl,
+      row: data.row,
+      section: data.section,
+      groupSize: data.groupSize,
+      expectedPrice: data.price,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to create event: ${res.status}`);
+  }
+  // Unwrap payload and return only the event object
+  const payload: { message: string; event: Event } = await res.json();
+  return payload.event;
 }
 
 export async function getEvents(): Promise<Event[]> {
@@ -33,6 +45,19 @@ export async function refreshAllEvents(): Promise<void> {
   const res = await fetch(`${API_URL}/refresh`, { method: 'POST' });
   if (!res.ok) {
     throw new Error(`Failed to refresh events: ${res.status}`);
+  }
+}
+
+/**
+ * Trigger a refresh of just one event’s XML data.
+ */
+export async function refreshEvent(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/${id}/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to refresh event ${id}: ${res.status}`);
   }
 }
 

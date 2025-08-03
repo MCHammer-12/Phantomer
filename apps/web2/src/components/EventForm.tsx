@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { EventFormData } from "@/types";
 import type { Section } from "@/types";
 import { useMutation } from "@tanstack/react-query";
-import { createEvent } from "@/services/api";
+import { createEvent, refreshEvent } from "@/services/api";
 import { queryClient } from "@/lib/queryClient";
 import { ChipInput, NumberChipInput, TagChipInput } from "./ChipInput";
 import { useState } from "react";
@@ -64,7 +64,9 @@ export default function EventForm({ onSuccess }: EventFormProps) {
 
   const mutation = useMutation({
     mutationFn: (data: EventFormData) => createEvent(data),
-    onSuccess: () => {
+    onSuccess: async (createdEvent) => {
+      // Fetch XML for the newly added event
+      await refreshEvent(createdEvent.id);
       queryClient.invalidateQueries({ queryKey: ["/api/events"] });
       toast({
         title: "Event Added",

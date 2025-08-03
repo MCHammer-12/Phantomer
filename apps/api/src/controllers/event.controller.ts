@@ -79,6 +79,13 @@ export class EventController {
     return { message: 'Refresh triggered' };
   }
 
+  @Post(':id/refresh')
+  async refreshEvent(@Param('id') id: string) {
+    const eventId = parseInt(id, 10);
+    await this.xmlFetcherService.fetchSingleEvent(eventId);
+    return { message: 'Event refresh triggered', eventId };
+  }
+
   @Delete(':id')
   async deleteEvent(@Param('id') id: string) {
     const eventId = parseInt(id, 10);

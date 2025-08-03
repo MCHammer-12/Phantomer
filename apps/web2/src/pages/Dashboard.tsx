@@ -85,6 +85,10 @@ export default function Dashboard() {
     setFilterOption(value);
   };
 
+  const handleEventDelete = (deletedId: number) => {
+    setEvents(prev => prev.filter(e => e.id !== deletedId));
+  };
+
   // Type guard: Ensure events is an array before proceeding
   if (!Array.isArray(events)) {
     console.warn("Events state is not an array:", events);
@@ -150,7 +154,7 @@ export default function Dashboard() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-nowrap gap-6 overflow-x-auto">
-          <EventForm onSuccess={handleRefresh} />
+          <EventForm onSuccess={fetchEvents} />
 
           <div className="flex-1 min-w-0">
             <SortFilterBar
@@ -171,7 +175,11 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-6 custom-scrollbar overflow-y-auto max-h-[calc(100vh-220px)]">
                 {filteredEvents.map((event: Event) => (
-                  <EventCard key={event.id} event={event} onDelete={handleRefresh} />
+                  <EventCard 
+                    key={event.id} 
+                    event={event} 
+                    onDelete={() => handleEventDelete(event.id)} 
+                  />
                 ))}
               </div>
             )}

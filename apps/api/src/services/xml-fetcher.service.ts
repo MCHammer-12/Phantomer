@@ -322,4 +322,29 @@ export class XMLFetcherService {
     }
     this.isworking = false;
   }
+  /**
+   * Fetch and store reservations for a single event by ID.
+   */
+  async fetchSingleEvent(eventId: number): Promise<void> {
+    try {
+      const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+      if (!event) {
+        this.logger.error(`Event ${eventId} not found`);
+        return;
+      }
+      await this.fetchAndStoreXML(
+        event.name,
+        event.sourceUrl,
+        event.id,
+        event.row || undefined,
+        event.section || undefined,
+        event.groupSize || undefined,
+        event.expectedPrice || undefined
+      );
+    } catch (err: any) {
+      this.logger.error(`Error in fetchSingleEvent(${eventId}): ${err.message}`);
+    }
+  }
 }
+
+
