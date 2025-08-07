@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { XMLParser } from 'fast-xml-parser';
 import { PrismaClient } from '@prisma/client';
 import { request } from 'playwright';
+import { chromium } from 'playwright';
 import * as http2 from 'http2';
 import { TLSSocket } from 'tls';
 console.log('HTTP_PROXY=', process.env.HTTP_PROXY, 'HTTPS_PROXY=', process.env.HTTPS_PROXY);
@@ -67,14 +68,19 @@ export class XMLFetcherService {
         this.logger.error('HTTP/2 session error:', err);
       }
 
-      // Fetch XML using Playwright APIRequestContext over HTTP/2
-      const apiContext = await request.newContext();
-      const res = await apiContext.get(eventUrl, { timeout: 15000 });
-      if (res.status() !== 200) {
-        throw new Error(`Failed to fetch URL, HTTP ${res.status()}`);
-      }
-      const xmlText = await res.text();
-      await apiContext.dispose();
+      // Fetch XML using Playwright browser context (chromium)
+      const browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext();
+      const page = await context.newPage();
+
+      this.logger.log(`Navigating to ${eventUrl} via browser context...`);
+      await page.goto(eventUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+      const xmlText = await page.evaluate(() => document.body.innerText);
+
+      this.logger.debug(`Fetched XML via browser context:\n${xmlText}`);
+
+      await browser.close();
 
       /* ───────────────────────── parse XML ───────────────────────── */
       const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
@@ -263,6 +269,7 @@ export class XMLFetcherService {
         `Fetch failed for ${eventName}: ${err?.cause?.code ?? err.message}`
       );
       this.logger.log({err})
+      throw err;
     }
   }
 
@@ -304,24 +311,50 @@ export class XMLFetcherService {
   //   }
   //   this.isworking = false
   // }
-  async runOnce() {
-    if (this.isworking) return;
+async runOnce(): Promise<{ successOccurred: boolean; errorsOccurred: boolean }> {
+    if (this.isworking) return { successOccurred: false, errorsOccurred: false };
     this.isworking = true;
     this.logger.log('Executing one-time XML fetch…');
+    let errorsOccurred = false;
+
     const events = await this.prisma.event.findMany();
+    let successOccurred = false;
+
     for (const e of events) {
-      await this.fetchAndStoreXML(
-        e.name,
-        e.sourceUrl,
-        e.id,
-        e.row || undefined,
-        e.section || undefined,
-        e.groupSize || undefined,
-        e.expectedPrice || undefined
-      );
+      try {
+        await this.fetchAndStoreXML(
+          e.name,
+          e.sourceUrl,
+          e.id,
+          e.row || undefined,
+          e.section || undefined,
+          e.groupSize || undefined,
+          e.expectedPrice || undefined
+        );
+        successOccurred = true;
+      } catch (err: any) {
+        this.logger.error(`Error fetching event ${e.id}: ${err?.message ?? err}`);
+        errorsOccurred = true;
+      }
     }
+
+    if (successOccurred) {
+      try {
+        const now = new Date().toISOString();
+        await this.prisma.metadata.upsert({
+          where: { key: 'lastSuccessfulFetch' },
+          create: { key: 'lastSuccessfulFetch', value: now },
+          update: { value: now },
+        });
+      } catch (err: any) {
+        this.logger.error(`Error persisting metadata: ${err?.message ?? err}`);
+      }
+    }
+
     this.isworking = false;
+    return { successOccurred, errorsOccurred };
   }
+  
   /**
    * Fetch and store reservations for a single event by ID.
    */
@@ -346,5 +379,3 @@ export class XMLFetcherService {
     }
   }
 }
-
-

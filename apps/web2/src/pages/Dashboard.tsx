@@ -9,14 +9,8 @@ import { Event, FilterOption, SortOption } from "@/types";
 import { queryClient } from "@/lib/queryClient";
 import { FileText } from "lucide-react";
 import { API_URL } from '@/types/constants';
+import { refreshAllEvents } from "@/services/api";
 
-// Trigger backend to refresh XML and update data
-async function refreshAllEvents(): Promise<void> {
-  const res = await fetch(`${API_URL}/events/refresh`, { method: 'POST' });
-  if (!res.ok) {
-    throw new Error(`Refresh failed: ${res.status}`);
-  }
-}
 
 const sortOptions: SortOption[] = [
   { value: "dateCreated", label: "Sort by Date Created" },
@@ -31,6 +25,9 @@ const filterOptions: FilterOption[] = [
 ];
 
 export default function Dashboard() {
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const [sortOption, setSortOption] = useState<string>("dateCreated");
   const [filterOption, setFilterOption] = useState<string>("all");
   // add usestate hooks 
@@ -40,6 +37,29 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   //one for errors
   const [error, setError] = useState<string | null>(null);
+
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+const fetchLastUpdated = async () => {
+  console.log("Calling fetchLastUpdated()");
+  try {
+    const res = await fetch(`${API_URL}/events/last-updated`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { lastUpdated } = await res.json();
+    if (lastUpdated) {
+      const formatted = new Date(lastUpdated).toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      setLastUpdated(formatted);
+      console.log("Fetched lastUpdated at mount:", formatted);
+    }
+  } catch (err) {
+    console.error("Failed to fetch last updated", err);
+  }
+};
+
 
   // Fetch events and update state
   const fetchEvents = async () => {
@@ -56,22 +76,34 @@ export default function Dashboard() {
   };
 
   // add useeffect to call async fetch function
-  useEffect(() => {
-    fetchEvents();
-  }, []);
-
+    useEffect(() => {
+      console.log("Dashboard useEffect initializing…");
+      const initialize = async () => {
+        await fetchEvents();
+        await fetchLastUpdated();
+      };
+      initialize();
+    }, []);
 
   const handleRefresh = async () => {
     setIsLoading(true);
     setError(null);
+    setSuccessMessage(null);
+    setErrorMessage(null);
+
     try {
-      // First tell backend to fetch fresh XML
-      await refreshAllEvents();
-      // Then re-fetch the events list
+      const result = await refreshAllEvents(); // returns { errorsOccurred: boolean }
       await fetchEvents();
+      await fetchLastUpdated();
+
+      if (result.errorsOccurred) {
+        setErrorMessage('Events not updated. Try again later');
+      } else {
+        setSuccessMessage('Events refreshed successfully');
+      }
     } catch (err) {
       setError((err as Error).message);
-      throw err;
+      setErrorMessage(`Full refresh failed: ${(err as Error).message}`);
     } finally {
       setIsLoading(false);
     }
@@ -138,11 +170,13 @@ export default function Dashboard() {
   // Error state component
   const ErrorState = ({ message }: { message: string }) => (
     <div className="bg-white dark:bg-neutral-800 shadow rounded-lg p-8 text-center">
-      <h3 className="text-lg font-medium text-red-600 dark:text-red-400 mb-2">Error loading events</h3>
-      <p className="text-gray-500 dark:text-gray-400 mb-4">{message}</p>
-      <Button onClick={handleRefresh} className="dark:bg-blue-700 dark:hover:bg-blue-600">Try Again</Button>
+      <h3 className="text-lg font-medium text-red-600 dark:text-red-400 mb-2">Welcome to Ticket Checker</h3>
+      {/* <p className="text-gray-500 dark:text-gray-400 mb-4">{message}</p> */}
+      <Button onClick={handleRefresh} className="dark:bg-blue-700 dark:hover:bg-blue-600">Load Events</Button>
     </div>
   );
+
+  console.log("Rendering Dashboard — passing lastUpdated:", lastUpdated);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -150,6 +184,9 @@ export default function Dashboard() {
         onRefresh={handleRefresh} 
         isRefreshing={isLoading} 
         events={events} 
+        successMessage={successMessage}
+        errorMessage={errorMessage}
+        lastUpdated={lastUpdated ?? "Never"}
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

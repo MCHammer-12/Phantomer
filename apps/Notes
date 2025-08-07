@@ -1,0 +1,13 @@
+To do:
+
+1. Refresh error messaging - successful message only on fetch success
+
+2. Edit existing listings on EventCard
+
+3. Check prisma migration - it's showing that it's not in sync
+
+4. number of groups available on eventcard
+
+5. group together listings of the same url
+
+6. add quickstart browser app

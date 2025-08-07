@@ -71,3 +71,8 @@ model SeatMapping {
 
   @@map("SeatMapping") // it wasn't recognizing the table so chatgpt told me to add this
 }
+
+model Metadata {
+  key   String @id
+  value String
+}

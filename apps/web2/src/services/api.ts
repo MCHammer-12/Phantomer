@@ -41,11 +41,13 @@ export async function getEvents(): Promise<Event[]> {
   }));
 }
 
-export async function refreshAllEvents(): Promise<void> {
-  const res = await fetch(`${API_URL}/refresh`, { method: 'POST' });
+export async function refreshAllEvents(): Promise<{ errorsOccurred: boolean }> {
+  const res = await fetch(`${API_URL}/events/refresh`, { method: 'POST' });
   if (!res.ok) {
     throw new Error(`Failed to refresh events: ${res.status}`);
   }
+  const payload = await res.json();
+  return { errorsOccurred: payload.errorsOccurred === true };
 }
 
 /**

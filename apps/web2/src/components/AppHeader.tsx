@@ -1,55 +1,90 @@
 import { RefreshCw } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import NotificationsPanel from "./NotificationsPanel";
 import { ThemeToggle } from "./ThemeToggle";
 import { Event } from "@/types";
+import { API_URL } from "@/types/constants";
 
 interface AppHeaderProps {
   onRefresh: () => Promise<void>;
   isRefreshing: boolean;
   events: Event[];
+  successMessage: string | null;
+  errorMessage: string | null;
+  lastUpdated: string;
 }
 
-export default function AppHeader({ onRefresh, isRefreshing, events }: AppHeaderProps) {
-  const [lastUpdated, setLastUpdated] = useState<string>("Never");
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isRefreshing) {
-      setLastUpdated(
-        new Date().toLocaleTimeString(undefined, {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-        })
-      );
-    }
-  }, [isRefreshing]);
+export default function AppHeader({
+  onRefresh,
+  isRefreshing,
+  events,
+  successMessage,
+  errorMessage,
+  lastUpdated
+}: AppHeaderProps) {
 
   const handleRefresh = async () => {
-    setSuccessMessage(null);
-    setErrorMessage(null);
     try {
       await onRefresh();
-      const time = new Date().toLocaleTimeString(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
-      setSuccessMessage(`Events updated successfully`);
     } catch (err: any) {
-      setErrorMessage(`Refresh failed: ${err.message}`);
+      console.error("Refresh failed:", err.message);
     }
   };
+
+
+  //const [lastUpdated, setLastUpdated] = useState<string>("Never");
+  
+
+  //const hasLoadedEvents = useRef(false);
+
+  // useEffect(() => {
+  //   // On mount, load the last persisted update timestamp
+  //   fetch(`${API_URL}/events/last-updated`, { cache: 'no-store' })
+  //     .then(res => {
+  //       if (!res.ok) {
+  //         throw new Error(`HTTP ${res.status}`);
+  //       }
+  //       return res.json();
+  //     })
+  //     .then(({ lastUpdated }) => {
+  //       if (lastUpdated) {
+  //         setLastUpdated(
+  //           new Date(lastUpdated).toLocaleTimeString(undefined, {
+  //             hour: "numeric",
+  //             minute: "2-digit",
+  //             hour12: true,
+  //           })
+  //         );
+  //       }
+  //     })
+  //     .catch(() => {
+  //       // Leave lastUpdated as "Never" on failure
+  //     });
+  // }, []);
+
+  // useEffect(() => {
+  //   if (!isRefreshing && events.length > 0) {
+  //     if (hasLoadedEvents.current) {
+  //       const time = new Date().toLocaleTimeString(undefined, {
+  //         hour: "numeric",
+  //         minute: "2-digit",
+  //         hour12: true,
+  //       });
+  //       setLastUpdated(time);
+  //     } else {
+  //       // Skip the initial load
+  //       hasLoadedEvents.current = true;
+  //     }
+  //   }
+  // }, [events, isRefreshing]);
 
   return (
     <header className="bg-white dark:bg-gray-900 shadow sticky top-0 z-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">
-            Ticket Monitoring System
+            Ticket Checker
           </h1>
           <div className="flex items-center space-x-3">
             <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -58,7 +93,7 @@ export default function AppHeader({ onRefresh, isRefreshing, events }: AppHeader
             <Button
               variant="ghost"
               size="icon"
-              onClick={handleRefresh}
+              onClick={onRefresh}
               disabled={isRefreshing}
               className="rounded-full"
             >

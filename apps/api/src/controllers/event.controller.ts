@@ -75,9 +75,9 @@ export class EventController {
   
   @Post('refresh')
   async refreshAll() {
-    await this.xmlFetcherService.runOnce();
-    return { message: 'Refresh triggered' };
-  }
+    const result = await this.xmlFetcherService.runOnce();
+    return { message: 'Refresh complete', errorsOccurred: result.errorsOccurred };
+}
 
   @Post(':id/refresh')
   async refreshEvent(@Param('id') id: string) {
@@ -105,5 +105,13 @@ export class EventController {
   @Delete('groupings/:id')
   async deleteGrouping(@Param('id') id: string) {
     return { message: 'Grouping deleted' };
+  }
+
+  @Get('last-updated')
+  async getLastUpdated() {
+    const record = await prisma.metadata.findUnique({
+      where: { key: 'lastSuccessfulFetch' },
+    });
+    return { lastUpdated: record?.value ?? null };
   }
 }
