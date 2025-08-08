@@ -51,36 +51,31 @@ export class XMLFetcherService {
     expectedPrice?: number
   ): Promise<void> {
 
+   /* ───────────────────────── timeout guard ───────────────────────── */
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+
     try {
-      this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId}) Event URL: ${eventUrl}`);
+      this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId})`);
       if (expectedPrice === undefined) {
         this.logger.error(`❌ Missing expectedPrice for event ${eventId} — all seats will fail price validation`);
       }
 
-      // Debug HTTP/2 negotiation
-      try {
-        const urlObj = new URL(eventUrl);
-        const session = http2.connect(urlObj.origin);
-        const tlsSocket = session.socket as TLSSocket;
-        this.logger.log('HTTP/2 ALPN protocol:', tlsSocket.alpnProtocol);
-        session.close();
-      } catch (err) {
-        this.logger.error('HTTP/2 session error:', err);
+      const response = await fetch(eventUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+          Accept: '*/*',
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
       }
 
-      // Fetch XML using Playwright browser context (chromium)
-      const browser = await chromium.launch({ headless: true });
-      const context = await browser.newContext();
-      const page = await context.newPage();
-
-      this.logger.log(`Navigating to ${eventUrl} via browser context...`);
-      await page.goto(eventUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-
-      const xmlText = await page.evaluate(() => document.body.innerText);
-
-      this.logger.debug(`Fetched XML via browser context:\n${xmlText}`);
-
-      await browser.close();
+      const xmlText = await response.text();
 
       /* ───────────────────────── parse XML ───────────────────────── */
       const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
@@ -265,11 +260,10 @@ export class XMLFetcherService {
       /* ─────────────── summary log only ─────────────── */
       this.logger.log(`Event ID ${eventId}: ${seatData.length} seats stored`);
     } catch (err: any) {
+      clearTimeout(timeout);
       this.logger.error(
         `Fetch failed for ${eventName}: ${err?.cause?.code ?? err.message}`
       );
-      this.logger.log({err})
-      throw err;
     }
   }
 
