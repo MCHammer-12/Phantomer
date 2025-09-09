@@ -2,10 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { XMLParser } from 'fast-xml-parser';
 import { PrismaClient } from '@prisma/client';
-import { request } from 'playwright';
-import { chromium } from 'playwright';
-import * as http2 from 'http2';
-import { TLSSocket } from 'tls';
 console.log('HTTP_PROXY=', process.env.HTTP_PROXY, 'HTTPS_PROXY=', process.env.HTTPS_PROXY);
 
 interface XmlZone {
@@ -28,20 +24,111 @@ export class XMLFetcherService {
   private readonly logger = new Logger(XMLFetcherService.name);
   private readonly prisma = new PrismaClient();
 
-  private isRowInFrontOrEqual(seatRow: string, targetRow: string): boolean {
-    const rowOrder = ['AAA', 'BBB', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
-    
-    const normalize = (r: string) => r.trim().toUpperCase();
-  
-    const seatIndex = rowOrder.indexOf(normalize(seatRow));
-    const targetIndex = rowOrder.indexOf(normalize(targetRow));
-  
-    if (seatIndex === -1 || targetIndex === -1) return false; // If row not in list, fail
-  
-    return seatIndex <= targetIndex;
+  private readonly SCRAPFLY_KEY = process.env.SCRAPFLY_KEY ?? '';
+  private readonly SCRAPFLY_ENABLED = (process.env.SCRAPFLY_ENABLED ?? '0') === '1';
+  private readonly SCRAPFLY_ESCALATE = (process.env.SCRAPFLY_ESCALATE ?? '0') === '1'; // allow ASP escalation if cheap tier fails
+  private readonly SCRAPFLY_COST_BUDGET_CHEAP = process.env.SCRAPFLY_COST_BUDGET_CHEAP ?? '1'; // 1 credit
+  private readonly SCRAPFLY_COST_BUDGET_ASP = process.env.SCRAPFLY_COST_BUDGET_ASP ?? '30';
+
+  // simple in-memory cache and inflight de-duplication per normalized URL
+  private memCache = new Map<string, { expires: number; body: string }>();
+  private inflight = new Map<string, Promise<string>>();
+
+  private normalizeUrl(url: string): string {
+    try {
+      const u = new URL(url);
+      u.hash = '';
+      // sort query params for stable keys
+      const entries = [...u.searchParams.entries()].sort(([a],[b]) => a.localeCompare(b));
+      u.search = entries.length ? '?' + entries.map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&') : '';
+      u.hostname = u.hostname.toLowerCase();
+      return u.toString();
+    } catch {
+      return url.trim();
+    }
   }
 
-  private async fetchAndStoreXML(
+  private getCached(url: string, ttlMs = 60_000): string | null {
+    const key = this.normalizeUrl(url);
+    const v = this.memCache.get(key);
+    if (!v) return null;
+    if (Date.now() > v.expires) { this.memCache.delete(key); return null; }
+    return v.body;
+  }
+
+  private setCached(url: string, body: string, ttlMs = 60_000): void {
+    const key = this.normalizeUrl(url);
+    this.memCache.set(key, { expires: Date.now() + ttlMs, body });
+  }
+
+  private async fetchOncePerUrl(url: string, fetcher: (u: string) => Promise<string>): Promise<string> {
+    const key = this.normalizeUrl(url);
+    const existing = this.inflight.get(key);
+    if (existing) return existing;
+    const p = fetcher(key).finally(() => this.inflight.delete(key));
+    this.inflight.set(key, p);
+    return p;
+  }
+
+  private async fetchXmlViaScrapfly(url: string, signal: AbortSignal): Promise<string> {
+    // If Scrapfly disabled, fall back to direct fetch
+    if (!this.SCRAPFLY_ENABLED || !this.SCRAPFLY_KEY) {
+      const resp = await fetch(url, { signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/xml,text/xml,*/*' } });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return await resp.text();
+    }
+
+    // Tier 1: cheapest – datacenter, no browser, no ASP
+    const sp1 = new URLSearchParams();
+    sp1.set('url', url);
+    sp1.set('key', this.SCRAPFLY_KEY);
+    sp1.set('proxy_pool', 'public_datacenter_pool');
+    sp1.set('retry', 'false');
+    sp1.set('country', 'us');
+    sp1.set('proxified_response', 'true');
+    sp1.set('cache', 'true');
+    sp1.set('cache_ttl', '300');
+    sp1.set('cost_budget', this.SCRAPFLY_COST_BUDGET_CHEAP); // 1 credit
+    let resp = await fetch(`https://api.scrapfly.io/scrape?${sp1.toString()}`, { method: 'GET', signal, headers: { 'Accept': 'application/xml,text/xml,*/*' } });
+    if (resp.ok) return await resp.text();
+
+    // If not allowed to escalate, throw
+    if (!this.SCRAPFLY_ESCALATE) {
+      const cost = resp.headers.get('X-Scrapfly-Api-Cost');
+      throw new Error(`Scrapfly cheap-tier failed (cost=${cost || '?'}) HTTP ${resp.status}`);
+    }
+
+    // Tier 2: ASP auto (may add browser/residential as needed)
+    const sp2 = new URLSearchParams();
+    sp2.set('url', url);
+    sp2.set('key', this.SCRAPFLY_KEY);
+    sp2.set('asp', 'true');
+    sp2.set('retry', 'true');
+    sp2.set('country', 'us');
+    sp2.set('proxified_response', 'true');
+    sp2.set('session', 'ticketcheck-arttix');
+    sp2.set('session_sticky_proxy', 'true');
+    sp2.set('cost_budget', this.SCRAPFLY_COST_BUDGET_ASP);
+
+    resp = await fetch(`https://api.scrapfly.io/scrape?${sp2.toString()}`, { method: 'GET', signal, headers: { 'Accept': 'application/xml,text/xml,*/*' } });
+    if (!resp.ok) {
+      const cost = resp.headers.get('X-Scrapfly-Api-Cost');
+      throw new Error(`Scrapfly ASP-tier failed (cost=${cost || '?'}) HTTP ${resp.status}`);
+    }
+    return await resp.text();
+  }
+
+  private async fetchXml(url: string, signal: AbortSignal): Promise<string> {
+    const cached = this.getCached(url);
+    if (cached) return cached;
+    const body = await this.fetchOncePerUrl(url, (u) => this.fetchXmlViaScrapfly(u, signal));
+    // store a short TTL to avoid repeated credits within the same run
+    this.setCached(url, body, 60_000);
+    return body;
+  }
+
+  private async processXmlForEvent(
+    xmlText: string,
     eventName: string,
     eventUrl: string,
     eventId: number,
@@ -50,33 +137,6 @@ export class XMLFetcherService {
     eventGroupSize?: number,
     expectedPrice?: number
   ): Promise<void> {
-
-   /* ───────────────────────── timeout guard ───────────────────────── */
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-
-    try {
-      this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId})`);
-      if (expectedPrice === undefined) {
-        this.logger.error(`❌ Missing expectedPrice for event ${eventId} — all seats will fail price validation`);
-      }
-
-      const response = await fetch(eventUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-          Accept: '*/*',
-        },
-      });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      }
-
-      const xmlText = await response.text();
-
       /* ───────────────────────── parse XML ───────────────────────── */
       const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
       const parsedData: any = parser.parse(xmlText);
@@ -101,13 +161,13 @@ export class XMLFetcherService {
           ? root.seats.TNSyosSeat
           : [root.seats.TNSyosSeat]
         : [];
-     
+
       const seatData = seats.map((seat) => {
         const match = zonePriceData.find(
           (z) => z.zoneColor === seat.CustomFill?.toLowerCase().trim()
         );
         return {
-          isvalid: false, //the isvalid column starts out as false
+          isvalid: false,
           seatNo: seat.seat_no ? Number(seat.seat_no) : 0,
           seatStatus: seat.seat_status?.toString() || '',
           seatType: seat.seat_type?.toString() || '',
@@ -121,102 +181,43 @@ export class XMLFetcherService {
       // troubleshooting: logging the amount of parsed seats
       this.logger.debug(`Raw seats parsed: ${seatData.length}`);
 
-      
       // Set Valid Groups to 0
       let validGroupCount = 0;
 
-      // done: select the entire array of SeatMapping, once it is in code I can do lookups like .find or .filter
       const SeatMapping = await this.prisma.seatMapping.findMany();
-      
+
       if (eventRow && eventSection) {
         seatData.forEach((seat)=>{
-          //early exit in all invalid cases, not changing boolean to false, just exiting if any of these trigger
-          // data validation:
-                // 1. Validate seatStatus
-            const mapping = SeatMapping.find((m) => m.seat_no === seat.seatNo);
-
-          if (!['0'].includes(seat.seatStatus)) {
-            this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatStatus ${seat.seatStatus}`);
-            return;
-          }
-        
-          if (seat.seatType !== '1') {
-            this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatType ${seat.seatType}`);
-            return;
-          }
-        
-          if (seat.price !== expectedPrice) {
-            this.logger.debug(`Seat ${seat.seatNo} rejected: price mismatch (found ${seat.price}, expected ${expectedPrice})`);
-            return;
-          }
-        
-          if (
-            eventSection &&
-            mapping?.section?.toLowerCase().trim() !== eventSection.toLowerCase().trim()
-          ) {
-            this.logger.debug(`Seat ${seat.seatNo} rejected: section mismatch (found ${mapping?.section}, expected ${eventSection})`);
-            return;
-          }
-        
-          if (!mapping || !mapping.row) {
-            this.logger.debug(`Seat ${seat.seatNo} rejected: no seat mapping or row`);
-            return;
-          }
-        
-          if (!this.isRowInFrontOrEqual(mapping.row, eventRow)) {
-            this.logger.debug(`Seat ${seat.seatNo} rejected: row ${mapping.row} is behind target ${eventRow}`);
-            return;
-          }
-        
-        
-
-          // if it hasn't exited yet, set to true
-              seat.isvalid = true;
-          // at this point, this is all seats that fit all parameters except the consecutive seating parameter
-          
+          const mapping = SeatMapping.find((m) => m.seat_no === seat.seatNo);
+          if (!['0'].includes(seat.seatStatus)) { this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatStatus ${seat.seatStatus}`); return; }
+          if (seat.seatType !== '1') { this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatType ${seat.seatType}`); return; }
+          if (seat.price !== expectedPrice) { this.logger.debug(`Seat ${seat.seatNo} rejected: price mismatch (found ${seat.price}, expected ${expectedPrice})`); return; }
+          if (eventSection && mapping?.section?.toLowerCase().trim() !== eventSection.toLowerCase().trim()) { this.logger.debug(`Seat ${seat.seatNo} rejected: section mismatch (found ${mapping?.section}, expected ${eventSection})`); return; }
+          if (!mapping || !mapping.row) { this.logger.debug(`Seat ${seat.seatNo} rejected: no seat mapping or row`); return; }
+          if (!this.isRowInFrontOrEqual(mapping.row, eventRow)) { this.logger.debug(`Seat ${seat.seatNo} rejected: row ${mapping.row} is behind target ${eventRow}`); return; }
+          seat.isvalid = true;
         });
       }
 
-      // troubleshooting: logging the amount of seats that passed individual validation
       const validBeforeGroup = seatData.filter(s => s.isvalid).length;
       this.logger.debug(`Seats valid before group filtering: ${validBeforeGroup}`);
 
-      // determine how many consecutive seats are in each seat group, if a seat group doesn't have enough seats to fit the criteria, set all isvalid values to false
-      // one group at a time, create a group by creating a separate array
-      // when you detect the first valid seat in a group, create a new array, use the adjacent seats table to find seats its next to and check if those seats next to it are valid as well, if they are, add them to the group, then keep following that same logic for each adjacent seat until you run into all invalid seats
-      // once we have an array of valid consecutive seats, check the number of seats against the specified parameter
-      // if the group is big enough, leave them all true
-      // if there are too few seats, set all of those seats to false
-
       if (eventGroupSize && eventGroupSize > 1) {
-        // Add helper flag to track processed seats
         seatData.forEach((s) => (s.groupChecked = false));
-      
         for (const seat of seatData) {
           if (!seat.isvalid || seat.groupChecked) continue;
-
           validGroupCount++;
-
           const group = [seat];
           seat.groupChecked = true;
-      
           const queue = [seat];
           while (queue.length > 0) {
             const current = queue.shift();
             if (!current) continue;
-      
             const mapping = SeatMapping.find((m) => m.seat_no === current.seatNo);
             if (!mapping || !mapping.adjacent_seats) continue;
-      
-            const adjacentSeatNos = mapping.adjacent_seats; // assume this is an array of numbers
-      
+            const adjacentSeatNos = mapping.adjacent_seats;
             for (const adjacentNo of adjacentSeatNos) {
-              const adjacentSeat = seatData.find(
-                (s) =>
-                  s.seatNo === adjacentNo &&
-                  s.isvalid &&
-                  !s.groupChecked
-              );
+              const adjacentSeat = seatData.find((s) => s.seatNo === adjacentNo && s.isvalid && !s.groupChecked);
               if (adjacentSeat) {
                 adjacentSeat.groupChecked = true;
                 group.push(adjacentSeat);
@@ -224,41 +225,72 @@ export class XMLFetcherService {
               }
             }
           }
-      
-          // After group built, check size
-          if (group.length < eventGroupSize) {
-            group.forEach((s) => (s.isvalid = false));
-          }
+          if (group.length < eventGroupSize) { group.forEach((s) => (s.isvalid = false)); }
         }
       }
-      // troubleshooting: log amount of seats still valid after grouping
+
       const validAfterGroup = seatData.filter(s => s.isvalid).length;
       this.logger.debug(`Seats valid after group filtering: ${validAfterGroup}`);
 
-      /* ─────────────── store to DB ─────────────── */
       await this.storeData(eventId, zonePriceData, seatData);
 
-      /* ---------- COUNT VALID GROUPS FOR SUMMARY ---------- */
       if (!eventGroupSize || eventGroupSize <= 1) {
-        // No grouping requirement ⇒ every valid seat counts as its own group
         validGroupCount = seatData.filter(s => s.isvalid).length;
       }
-      // troubleshooting:
       this.logger.debug(`Counted ${validGroupCount} valid groups (no grouping logic)`);
 
-      // else branch is already handled inside the contiguous-group loop
-      // (it bumps validGroupCount++ once per qualifying group)
-
-      // Log how many valid groups there are
-      const summaryMessage =
-              validGroupCount === 0
-              ? 'This ticket grouping is no longer available'
-              : `This ticket grouping is still available\n# of groups: ${validGroupCount}`;
-
+      const summaryMessage = validGroupCount === 0
+        ? 'This ticket grouping is no longer available'
+        : `This ticket grouping is still available\n# of groups: ${validGroupCount}`;
       this.logger.log(summaryMessage);
-
-      /* ─────────────── summary log only ─────────────── */
       this.logger.log(`Event ID ${eventId}: ${seatData.length} seats stored`);
+  }
+
+  private isRowInFrontOrEqual(seatRow: string, targetRow: string): boolean {
+    const rowOrder = ['AAA', 'BBB', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
+    
+    const normalize = (r: string) => r.trim().toUpperCase();
+  
+    const seatIndex = rowOrder.indexOf(normalize(seatRow));
+    const targetIndex = rowOrder.indexOf(normalize(targetRow));
+  
+    if (seatIndex === -1 || targetIndex === -1) return false; // If row not in list, fail
+  
+    return seatIndex <= targetIndex;
+  }
+
+  private async fetchAndStoreXML(
+    eventName: string,
+    eventUrl: string,
+    eventId: number,
+    eventRow?: string,
+    eventSection?: string,
+    eventGroupSize?: number,
+    expectedPrice?: number
+  ): Promise<void> {
+    /* ───────────────────────── timeout guard ───────────────────────── */
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 130_000);
+
+    try {
+      this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId})`);
+      if (expectedPrice === undefined) {
+        this.logger.error(`❌ Missing expectedPrice for event ${eventId} — all seats will fail price validation`);
+      }
+
+      const xmlText = await this.fetchXml(eventUrl, controller.signal);
+      clearTimeout(timeout);
+
+      await this.processXmlForEvent(
+        xmlText,
+        eventName,
+        eventUrl,
+        eventId,
+        eventRow,
+        eventSection,
+        eventGroupSize,
+        expectedPrice
+      );
     } catch (err: any) {
       clearTimeout(timeout);
       this.logger.error(
@@ -314,20 +346,34 @@ async runOnce(): Promise<{ successOccurred: boolean; errorsOccurred: boolean }> 
     const events = await this.prisma.event.findMany();
     let successOccurred = false;
 
+    const byUrl = new Map<string, typeof events>();
     for (const e of events) {
+      const key = this.normalizeUrl(e.sourceUrl);
+      const arr = byUrl.get(key) ?? [];
+      arr.push(e);
+      byUrl.set(key, arr);
+    }
+
+    for (const [url, group] of byUrl) {
       try {
-        await this.fetchAndStoreXML(
-          e.name,
-          e.sourceUrl,
-          e.id,
-          e.row || undefined,
-          e.section || undefined,
-          e.groupSize || undefined,
-          e.expectedPrice || undefined
-        );
-        successOccurred = true;
+        // Fetch XML once per distinct URL (cached/inflight aware)
+        const controller = new AbortController();
+        const xmlText = await this.fetchXml(url, controller.signal);
+        for (const e of group) {
+          await this.processXmlForEvent(
+            xmlText,
+            e.name,
+            e.sourceUrl,
+            e.id,
+            e.row || undefined,
+            e.section || undefined,
+            e.groupSize || undefined,
+            e.expectedPrice || undefined
+          );
+          successOccurred = true;
+        }
       } catch (err: any) {
-        this.logger.error(`Error fetching event ${e.id}: ${err?.message ?? err}`);
+        this.logger.error(`Error fetching group url ${url}: ${err?.message ?? err}`);
         errorsOccurred = true;
       }
     }
