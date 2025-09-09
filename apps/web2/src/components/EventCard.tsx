@@ -14,7 +14,7 @@ import { formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
-import { updateGrouping, deleteGrouping, deleteEvent } from "@/services/api";
+import { updateGrouping, deleteGrouping, deleteEvent, refreshEvent, getEvent } from "@/services/api";
 import { queryClient } from "@/lib/queryClient";
 import {
   Select,
@@ -39,10 +39,46 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<{ id: number, type: 'event' | 'grouping' } | null>(null);
   const [editFormData, setEditFormData] = useState<GroupingUpdateData>({});
+  const [optimisticEvent, setOptimisticEvent] = useState<Event | null>(null);
+  const currentEvent = optimisticEvent ?? event;
 
-  const hasAvailableGroupings = event.groupings.some(
+  const hasAvailableGroupings = currentEvent.groupings.some(
     (grouping) => grouping.isAvailable
   );
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+function delay(ms: number) { return new Promise(res => setTimeout(res, ms)); }
+
+async function refreshAndLoad(id: number) {
+  setIsRefreshing(true);
+  try {
+    await refreshEvent(id);
+    // Poll a few times for updated availability
+    let latest: Event | null = null;
+    for (let i = 0; i < 5; i++) {
+      await delay(400 + i * 300); // 400, 700, 1000, 1300, 1600ms
+      latest = await getEvent(id);
+      if (latest) break;
+    }
+    if (latest) {
+      setOptimisticEvent(latest);
+      // Update only this event in the cached list
+      queryClient.setQueryData(["/api/events"], (old: any) => {
+        if (!old) return old;
+        if (Array.isArray(old)) {
+          return old.map((e: Event) => (e.id === latest!.id ? latest! : e));
+        }
+        if (old && Array.isArray(old.events)) {
+          return { ...old, events: old.events.map((e: Event) => (e.id === latest!.id ? latest! : e)) };
+        }
+        return old;
+      });
+    }
+  } finally {
+    setIsRefreshing(false);
+  }
+}
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
@@ -66,22 +102,78 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
   const updateGroupingMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: GroupingUpdateData }) => 
       updateGrouping(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
-      setEditingGroupingId(null);
-      setEditFormData({});
-      toast({
-        title: "Grouping updated",
-        description: "The grouping has been updated successfully",
+    onMutate: async ({ id, data }) => {
+      // Cancel any outgoing refetches for the list
+      await queryClient.cancelQueries({ queryKey: ["/api/events"] });
+      // Snapshot previous cache
+      const prev = queryClient.getQueryData(["/api/events"]);
+
+      // Optimistically update cached list (supports array or { events: [] } shapes)
+      queryClient.setQueryData(["/api/events"], (old: any) => {
+        if (!old) return old;
+        const apply = (e: Event) => {
+          if (e.id !== id) return e;
+          const g = e.groupings?.[0];
+          const updatedGrouping = g ? {
+            ...g,
+            section: (data.section ?? g.section) as any,
+            row: data.row ?? g.row,
+            price: typeof data.price === 'number' ? data.price : g.price,
+            groupSize: typeof data.groupSize === 'number' ? data.groupSize : g.groupSize,
+          } : undefined;
+          return {
+            ...e,
+            groupings: updatedGrouping ? [updatedGrouping] : e.groupings,
+          } as Event;
+        };
+
+        if (Array.isArray(old)) {
+          return old.map(apply);
+        }
+        if (old && Array.isArray(old.events)) {
+          return { ...old, events: old.events.map(apply) };
+        }
+        return old;
       });
+
+      // Also optimistically close the editor locally
+      setEditingGroupingId(null);
+
+      // Locally reflect the changes on this card immediately
+      const base = optimisticEvent ?? event;
+      const g0 = base.groupings?.[0];
+      if (g0) {
+        const og = {
+          ...g0,
+          section: (data.section ?? g0.section) as any,
+          row: data.row ?? g0.row,
+          price: typeof data.price === 'number' ? data.price : g0.price,
+          groupSize: typeof data.groupSize === 'number' ? data.groupSize : g0.groupSize,
+        };
+        setOptimisticEvent({ ...base, groupings: [og] });
+      }
+
+      // Return context for potential rollback
+      return { prev };
     },
-    onError: (error) => {
+    onError: (error, _vars, ctx) => {
+      // Rollback on error
+      if (ctx?.prev) queryClient.setQueryData(["/api/events"], ctx.prev as any);
+      setOptimisticEvent(null);
       toast({
         title: "Error",
         description: `Failed to update grouping: ${error.message}`,
         variant: "destructive",
       });
-    }
+    },
+
+    onSuccess: async () => {
+      await refreshAndLoad(currentEvent.id);
+      toast({
+        title: "Grouping updated",
+        description: "Event refreshed with new availability.",
+      });
+    },
   });
 
   const deleteGroupingMutation = useMutation({
@@ -110,6 +202,7 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/events"] });
       setDeleteConfirmOpen(false);
       setGroupToDelete(null);
+      setOptimisticEvent(null);
       toast({
         title: "Event deleted",
         description: "The event and all its groupings have been deleted successfully",
@@ -151,10 +244,10 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-                {event.eventName}
+                {currentEvent.eventName}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Added on {formatDate(event.dateCreated)}
+                Added on {formatDate(currentEvent.dateCreated)}
               </p>
             </div>
             <div className="flex items-center space-x-2">
@@ -172,7 +265,7 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
                 variant="ghost"
                 size="icon"
                 className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 h-7 w-7"
-                onClick={() => confirmDelete(event.id, 'event')}
+                onClick={() => confirmDelete(currentEvent.id, 'event')}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
@@ -198,18 +291,18 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
             <div className="flex items-center mb-4">
               <LinkIcon className="h-4 w-4 text-gray-500 dark:text-gray-400 mr-1" />
               <a
-                href={event.eventUrl}
+                href={currentEvent.eventUrl}
                 className="text-primary hover:underline text-sm"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                {event.eventUrl}
+                {currentEvent.eventUrl}
               </a>
             </div>
 
             <div className="flex overflow-x-auto pb-4 -mx-1 px-1">
               <div className="flex gap-4 flex-nowrap">
-                {event.groupings.map((grouping) => (
+                {currentEvent.groupings.map((grouping) => (
                   <div
                     key={grouping.id}
                     className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden w-[280px] flex-shrink-0"

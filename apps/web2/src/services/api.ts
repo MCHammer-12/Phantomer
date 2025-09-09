@@ -63,6 +63,22 @@ export async function refreshEvent(id: number): Promise<void> {
   }
 }
 
+export async function getEvent(id: number): Promise<Event> {
+  const res = await fetch(`${API_BASE_URL}/by-id/${id}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch event ${id}: ${res.status}`);
+  }
+  const evt = await res.json();
+  // Ensure groupings array exists
+  return {
+    ...evt,
+    groupings: Array.isArray(evt.groupings) ? evt.groupings : [],
+  } as Event;
+}
+
 export async function updateGrouping(id: number, data: GroupingUpdateData): Promise<Grouping> {
   const res = await fetch(`${API_BASE_URL}/groupings/${id}`, {
     method: 'PATCH',

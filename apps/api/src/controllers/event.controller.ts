@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Get, Delete, Param } from '@nestjs/common';
+import { Body, Controller, Post, Get, Delete, Param, Patch, BadRequestException, NotFoundException } from '@nestjs/common';
 import { XMLFetcherService } from '../services/xml-fetcher.service';
 import { PrismaClient } from '@prisma/client';
 
@@ -72,6 +72,38 @@ export class EventController {
       return { error: 'Failed to fetch events' };
     }
   }
+
+  @Get('by-id/:id')
+async getEvent(@Param('id') id: string) {
+  const eventId = parseInt(id, 10);
+  const e = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!e) {
+    throw new NotFoundException('Event not found');
+  }
+
+  const size = e.groupSize ?? 1;
+  const validSeatsCount = await prisma.eventSeat.count({
+    where: { eventId: e.id, isvalid: true },
+  });
+  const isAvailable = size > 1 ? validSeatsCount >= size : validSeatsCount > 0;
+
+  return {
+    id: e.id,
+    eventName: e.name,
+    eventUrl: e.sourceUrl,
+    dateCreated: e.createdAt,
+    groupings: [
+      {
+        id: e.id,
+        section: e.section,
+        row: e.row,
+        price: e.expectedPrice,
+        groupSize: size,
+        isAvailable,
+      },
+    ],
+  };
+}
   
   @Post('refresh')
   async refreshAll() {
@@ -101,6 +133,55 @@ export class EventController {
       return { error: 'Failed to delete event' };
     }
   }
+
+  // Update a grouping (maps to updating the event's fields since grouping id === event id)
+@Patch('groupings/:id')
+async updateGrouping(
+  @Param('id') id: string,
+  @Body() body: { section?: string; row?: string; price?: number; groupSize?: number }
+) {
+  const eventId = parseInt(id, 10);
+  if (Number.isNaN(eventId)) {
+    throw new BadRequestException('Invalid id');
+  }
+
+  const existing = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!existing) {
+    throw new NotFoundException('Event not found');
+  }
+
+  const data: any = {};
+  if (typeof body.section === 'string') data.section = body.section;
+  if (typeof body.row === 'string') data.row = body.row;
+  if (typeof body.groupSize === 'number') data.groupSize = body.groupSize;
+  if (typeof body.price === 'number') data.expectedPrice = body.price; // price maps to expectedPrice
+
+  const updated = await prisma.event.update({ where: { id: eventId }, data });
+
+  // Return a normalized shape similar to list entries
+  const size = updated.groupSize ?? 1;
+  const validSeatsCount = await prisma.eventSeat.count({
+    where: { eventId: updated.id, isvalid: true },
+  });
+  const isAvailable = size > 1 ? validSeatsCount >= size : validSeatsCount > 0;
+
+  return {
+    id: updated.id,
+    eventName: updated.name,
+    eventUrl: updated.sourceUrl,
+    dateCreated: updated.createdAt,
+    groupings: [
+      {
+        id: updated.id,
+        section: updated.section,
+        row: updated.row,
+        price: updated.expectedPrice,
+        groupSize: size,
+        isAvailable,
+      },
+    ],
+  };
+}
 
   @Delete('groupings/:id')
   async deleteGrouping(@Param('id') id: string) {
