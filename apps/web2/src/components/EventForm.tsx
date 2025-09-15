@@ -1,250 +1,246 @@
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { useToast } from "@/hooks/use-toast";
-import { Button } from "@/components/ui/button";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { EventFormData } from "@/types";
-import type { Section } from "@/types";
-import { useMutation } from "@tanstack/react-query";
-import { createEvent, refreshEvent } from "@/services/api";
-import { queryClient } from "@/lib/queryClient";
-import { ChipInput, NumberChipInput, TagChipInput } from "./ChipInput";
 import { useState } from "react";
+import { API_URL } from "../types/constants";
 
-// Form schema with single-select fields
-const formSchema = z.object({
-  eventName: z.string().min(1, "Event name is required"),
-  eventUrl: z.string().url("Must be a valid URL"),
-  row: z.string().min(1, "Row is required"),
-  section: z.enum(["Left", "Center", "Right"], {
-    required_error: "Section is required",
-    invalid_type_error: "Section must be Left, Center, or Right",
-  }),
-  price: z.coerce
-    .number()
-    .positive("Price must be a positive number")
-    .min(0.01, "Price must be at least 0.01"),
-  groupSize: z.coerce
-    .number()
-    .int("Group size must be a whole number")
-    .positive("Group size must be a positive number")
-    .min(1, "Group size must be at least 1"),
-  tag: z.string().optional(),
-});
+const FLOOR_SECTIONS: { label: string; id: number }[] = [
+  { label: "Main", id: 1 },
+  { label: "MainR", id: 2 },
+  { label: "T 1", id: 3 },
+  { label: "T 2", id: 4 },
+  { label: "T 3", id: 5 },
+];
 
-interface EventFormProps {
-  onSuccess?: () => void;
-}
+const LCR_SECTIONS: { label: string; value: "left" | "center" | "right" }[] = [
+  { label: "Left", value: "left" },
+  { label: "Center", value: "center" },
+  { label: "Right", value: "right" },
+];
 
-export default function EventForm({ onSuccess }: EventFormProps) {
-  const { toast } = useToast();
-  const [urlError, setUrlError] = useState<string | null>(null);
-  const [availableTags] = useState(["VIP", "Premium", "General", "Discount", "Limited"]);
-  
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      eventName: "",
-      eventUrl: "",
-      row: "",
-      section: "Left" as Section,
-      price: undefined,
-      groupSize: undefined,
-      tag: undefined,
-    },
-  });
+export default function EventForm() {
+  const [name, setName] = useState("");
+  const [eventUrl, setEventUrl] = useState("");
+  const [screenId, setScreenId] = useState<number | null>(null); // Floor Section
+  const [row, setRow] = useState("");
+  const [section, setSection] = useState<"left" | "center" | "right">("center"); // L/C/R
+  const [groupSize, setGroupSize] = useState(1);
+  const [expectedPrice, setExpectedPrice] = useState<number | "">("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const mutation = useMutation({
-    mutationFn: (data: EventFormData) => createEvent(data),
-    onSuccess: async (createdEvent) => {
-      // Fetch XML for the newly added event
-      await refreshEvent(createdEvent.id);
-      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
-      toast({
-        title: "Event Added",
-        description: "Your event has been added to monitoring",
-        variant: "default",
-      });
-      form.reset();
-      if (onSuccess) {
-        onSuccess();
-      }
-    },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: `Failed to add event: ${error.message}`,
-        variant: "destructive",
-      });
-    },
-  });
-
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    setUrlError(null);
-    const urlPattern = /^https:\/\/my\.arttix\.org\/api\/syos\/GetSeatList\?performanceId=\d+&facilityId=\d+&screenId=\d+$/;
-    if (!urlPattern.test(values.eventUrl)) {
-      setUrlError(
-        "Invalid URL – must be: https://my.arttix.org/api/syos/GetSeatList?performanceId=<id>&facilityId=<id>&screenId=<id>"
-      );
+  const submitForm = async () => {
+    if (!eventUrl.trim()) {
+      setSuccessMessage("Event URL is required ❌");
       return;
     }
-    mutation.mutate(values);
-  }
+    if (screenId == null) {
+      setSuccessMessage("Please select a Floor Section ❌");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/events/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          eventUrl: eventUrl.trim(),
+          screenId,
+          row,
+          section,
+          groupSize,
+          expectedPrice: expectedPrice === "" ? undefined : Number(expectedPrice),
+        }),
+      });
+
+      if (res.ok) {
+        setSuccessMessage("Event created successfully! ✅");
+        // Clear fields
+        setName("");
+        setEventUrl("");
+        setScreenId(null);
+        setRow("");
+        setSection("center");
+        setGroupSize(1);
+        setExpectedPrice("");
+
+        setTimeout(() => setSuccessMessage(""), 3000);
+      } else {
+        setSuccessMessage("Failed to create event ❌");
+      }
+    } catch (error) {
+      console.error("Error submitting event:", error);
+      setSuccessMessage("An error occurred ❌");
+    }
+  };
 
   return (
-    <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 w-[300px] flex-shrink-0">
-      <h2 className="text-lg font-semibold mb-4 dark:text-white">Add New Event</h2>
-      {urlError && (
-        <div className="text-red-500 text-sm mb-2">
-          {urlError}
+    <div style={styles.container}>
+      <h2
+        style={{
+          color: "white",
+          fontWeight: "bold",
+          fontSize: "24px",
+          textAlign: "center",
+          paddingRight: "0px",
+          width: "100%",
+          maxWidth: 315,
+          margin: "0 auto 8px",
+        }}
+      >
+        Event Form
+      </h2>
+
+      <input
+        type="text"
+        placeholder="Event Name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        style={styles.input}
+      />
+
+      <input
+        type="text"
+        placeholder="Event URL"
+        value={eventUrl}
+        onChange={(e) => setEventUrl(e.target.value)}
+        style={styles.input}
+      />
+
+      {/* Floor Section buttons */}
+      <div style={{ width: "100%", maxWidth: 285, marginBottom: 16 }}>
+        {/*<div style={{ marginBottom: 6, fontSize: 14 }}>Floor Section</div>*/}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+          {FLOOR_SECTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setScreenId(opt.id)}
+              style={{
+                width: "100%",
+                padding: "8px 10px",
+                borderRadius: 6,
+                border: "1px solid #ccc",
+                cursor: "pointer",
+                background: screenId === opt.id ? "#eee" : "white",
+                fontSize: 14,
+                lineHeight: 1.2,
+              }}
+              aria-pressed={screenId === opt.id}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
-      )}
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
-          <FormField
-            control={form.control}
-            name="eventName"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <Input
-                    placeholder="Enter event name"
-                    className="bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 border-gray-300 dark:border-gray-600"
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage className="dark:text-red-400" />
-              </FormItem>
-            )}
-          />
+      </div>
 
-          <FormField
-            control={form.control}
-            name="eventUrl"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <Input
-                    placeholder="Event URL"
-                    type="url"
-                    className="bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 border-gray-300 dark:border-gray-600"
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage className="dark:text-red-400" />
-              </FormItem>
-            )}
-          />
+      <input
+        type="text"
+        placeholder="Row (e.g., M)"
+        value={row}
+        onChange={(e) => setRow(e.target.value.toUpperCase())}
+        style={styles.input}
+      />
 
-          <FormField
-            control={form.control}
-            name="row"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <Input
-                    placeholder="Row (e.g., A, B, C)"
-                    className="bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 border-gray-300 dark:border-gray-600"
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage className="dark:text-red-400" />
-              </FormItem>
-            )}
-          />
+      <input
+        type="number"
+        placeholder="Ticket Price"
+        value={expectedPrice}
+        onChange={(e) => setExpectedPrice(e.target.value === "" ? "" : Number(e.target.value))}
+        style={styles.input}
+      />
 
-          <FormField
-            control={form.control}
-            name="section"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <ChipInput
-                    options={["Left", "Center", "Right"]}
-                    selectedValue={field.value}
-                    onChange={field.onChange}
-                    placeholder="Select section"
-                  />
-                </FormControl>
-                <FormMessage className="dark:text-red-400" />
-              </FormItem>
-            )}
-          />
+      {/* L/C/R Section buttons */}
+      <div style={{ width: "100%", maxWidth: 285, marginBottom: 16 }}>
+        {/* <div style={{ marginBottom: 6, fontSize: 14 }}>L/C/R Section</div> */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          {LCR_SECTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setSection(opt.value)}
+              style={{
+                width: "100%",
+                padding: "8px 10px",
+                borderRadius: 6,
+                border: "1px solid #ccc",
+                cursor: "pointer",
+                background: section === opt.value ? "#eee" : "white",
+              }}
+              aria-pressed={section === opt.value}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-          <FormField
-            control={form.control}
-            name="price"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <Input
-                    placeholder="Maximum price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className="bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 border-gray-300 dark:border-gray-600"
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage className="dark:text-red-400" />
-              </FormItem>
-            )}
-          />
+      <input
+        type="number"
+        placeholder="Group Size"
+        value={groupSize}
+        onChange={(e) => setGroupSize(Number(e.target.value))}
+        style={styles.input}
+        min={1}
+      />
 
-          <FormField
-            control={form.control}
-            name="groupSize"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <NumberChipInput
-                    min={1}
-                    max={8}
-                    selectedValue={field.value ?? null}
-                    onChange={field.onChange}
-                    placeholder="Select group size"
-                  />
-                </FormControl>
-                <FormMessage className="dark:text-red-400" />
-              </FormItem>
-            )}
-          />
-          
-          <FormField
-            control={form.control}
-            name="tag"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <ChipInput
-                    options={availableTags}
-                    selectedValue={field.value ?? null}
-                    onChange={field.onChange}
-                    placeholder="Select a tag (optional)"
-                  />
-                </FormControl>
-                <FormMessage className="dark:text-red-400" />
-              </FormItem>
-            )}
-          />
+      <button onClick={submitForm} style={styles.button}>
+        Submit
+      </button>
 
-          <Button
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium dark:bg-blue-700 dark:hover:bg-blue-600"
-            disabled={mutation.isPending}
-          >
-            {mutation.isPending ? "Adding..." : "Add Event to Monitor"}
-          </Button>
-        </form>
-      </Form>
+      {successMessage && <p style={styles.successMessage}>{successMessage}</p>}
     </div>
   );
 }
+
+const styles: { [key: string]: React.CSSProperties } = {
+  container: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    width: "100%",
+    maxWidth: 315,
+    padding: "16px",
+    margin: "0 auto",
+    boxSizing: "border-box",
+    overflowX: "hidden",
+  },
+  input: {
+    width: "100%",
+    maxWidth: 285,
+    padding: "10px",
+    fontSize: "16px",
+    marginBottom: "16px",
+    borderRadius: "5px",
+    border: "1px solid #ccc",
+    textAlign: "left",
+    boxSizing: "border-box",
+  },
+  button: {
+    width: "100%",
+    maxWidth: 285,
+    padding: "10px",
+    fontSize: "16px",
+    backgroundColor: "white",
+    color: "black",
+    border: "1px solid black",
+    borderRadius: "5px",
+    cursor: "pointer",
+    textAlign: "center",
+    boxSizing: "border-box",
+    marginTop: 4,
+  },
+  response: {
+    marginTop: "20px",
+    textAlign: "left",
+    width: "100%",
+    maxWidth: "285px",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    overflowX: "auto",
+    boxSizing: "border-box",
+  },
+  successMessage: {
+    color: "green",
+    marginTop: "10px",
+    fontSize: "16px",
+    fontWeight: "bold",
+  },
+};

@@ -3,7 +3,6 @@ import { Event, Grouping, GroupingUpdateData } from "@/types";
 import { 
   ChevronDown, 
   ChevronUp, 
-  Link as LinkIcon, 
   Edit, 
   Trash2,
   Save,
@@ -33,6 +32,10 @@ interface EventCardProps {
 }
 
 export default function EventCard({ event, onDelete }: EventCardProps) {
+  const toHref = (u?: string) => {
+    const s = u ?? "";
+    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  };
   const { toast } = useToast();
   const [isExpanded, setIsExpanded] = useState(true);
   const [editingGroupingId, setEditingGroupingId] = useState<number | null>(null);
@@ -41,6 +44,7 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
   const [editFormData, setEditFormData] = useState<GroupingUpdateData>({});
   const [optimisticEvent, setOptimisticEvent] = useState<Event | null>(null);
   const currentEvent = optimisticEvent ?? event;
+  const groupsFound = (currentEvent as any).groupCount ?? 0;
 
   const hasAvailableGroupings = currentEvent.groupings.some(
     (grouping) => grouping.isAvailable
@@ -53,7 +57,7 @@ function delay(ms: number) { return new Promise(res => setTimeout(res, ms)); }
 async function refreshAndLoad(id: number) {
   setIsRefreshing(true);
   try {
-    await refreshEvent(id);
+    const r = await refreshEvent(id);
     // Poll a few times for updated availability
     let latest: Event | null = null;
     for (let i = 0; i < 5; i++) {
@@ -62,15 +66,26 @@ async function refreshAndLoad(id: number) {
       if (latest) break;
     }
     if (latest) {
-      setOptimisticEvent(latest);
+      setOptimisticEvent({ ...latest, groupCount: typeof r?.groupCount === 'number' ? r.groupCount : (latest as any).groupCount });
       // Update only this event in the cached list
       queryClient.setQueryData(["/api/events"], (old: any) => {
         if (!old) return old;
         if (Array.isArray(old)) {
-          return old.map((e: Event) => (e.id === latest!.id ? latest! : e));
+          return old.map((e: Event) =>
+            e.id === latest!.id
+              ? { ...latest!, groupCount: typeof r?.groupCount === 'number' ? r.groupCount : (latest as any).groupCount }
+              : e
+          );
         }
         if (old && Array.isArray(old.events)) {
-          return { ...old, events: old.events.map((e: Event) => (e.id === latest!.id ? latest! : e)) };
+          return {
+            ...old,
+            events: old.events.map((e: Event) =>
+              e.id === latest!.id
+                ? { ...latest!, groupCount: typeof r?.groupCount === 'number' ? r.groupCount : (latest as any).groupCount }
+                : e
+            ),
+          };
         }
         return old;
       });
@@ -87,9 +102,9 @@ async function refreshAndLoad(id: number) {
   const startEditing = (grouping: Grouping) => {
     setEditingGroupingId(grouping.id);
     setEditFormData({
-      section: grouping.section as "Left" | "Center" | "Right",
+      section: grouping.section as 'left' | 'center' | 'right',
       row: grouping.row,
-      price: grouping.price,
+      price: grouping.price ?? undefined,
       groupSize: grouping.groupSize
     });
   };
@@ -118,8 +133,8 @@ async function refreshAndLoad(id: number) {
             ...g,
             section: (data.section ?? g.section) as any,
             row: data.row ?? g.row,
-            price: typeof data.price === 'number' ? data.price : g.price,
-            groupSize: typeof data.groupSize === 'number' ? data.groupSize : g.groupSize,
+            price: typeof data.price === 'number' ? data.price : (g.price ?? undefined),
+            groupSize: typeof data.groupSize === 'number' ? data.groupSize : (g.groupSize ?? undefined),
           } : undefined;
           return {
             ...e,
@@ -244,7 +259,19 @@ async function refreshAndLoad(id: number) {
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-                {currentEvent.eventName}
+                {currentEvent.eventUrl ? (
+                  <a
+                    href={toHref(currentEvent.eventUrl)}
+                    className="text-primary hover:underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={toHref(currentEvent.eventUrl)}
+                  >
+                    {currentEvent.eventName}
+                  </a>
+                ) : (
+                  currentEvent.eventName
+                )}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 Added on {formatDate(currentEvent.dateCreated)}
@@ -260,7 +287,12 @@ async function refreshAndLoad(id: number) {
               >
                 {hasAvailableGroupings ? "Available" : "Unavailable"}
               </span>
-              
+              <span
+                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+                title="Groups found"
+              >
+                Groups: {groupsFound}
+              </span>
               <Button
                 variant="ghost"
                 size="icon"
@@ -287,20 +319,8 @@ async function refreshAndLoad(id: number) {
         </div>
 
         {isExpanded && (
-          <div className="px-6 py-4">
-            <div className="flex items-center mb-4">
-              <LinkIcon className="h-4 w-4 text-gray-500 dark:text-gray-400 mr-1" />
-              <a
-                href={currentEvent.eventUrl}
-                className="text-primary hover:underline text-sm"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {currentEvent.eventUrl}
-              </a>
-            </div>
-
-            <div className="flex overflow-x-auto pb-4 -mx-1 px-1">
+          <div className="px-6 py-4 overflow-x-hidden">
+            <div className="flex overflow-x-auto pb-4 px-1 no-scrollbar">
               <div className="flex gap-4 flex-nowrap">
                 {currentEvent.groupings.map((grouping) => (
                   <div
@@ -316,16 +336,16 @@ async function refreshAndLoad(id: number) {
                             <Select
                               value={editFormData.section}
                               onValueChange={(value) => 
-                                setEditFormData({...editFormData, section: value as "Left" | "Center" | "Right"})
+                                setEditFormData({...editFormData, section: value as "left" | "center" | "right"})
                               }
                             >
                               <SelectTrigger className="h-8 text-sm">
                                 <SelectValue placeholder="Select section" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Left">Left</SelectItem>
-                                <SelectItem value="Center">Center</SelectItem>
-                                <SelectItem value="Right">Right</SelectItem>
+                                <SelectItem value="left">Left</SelectItem>
+                                <SelectItem value="center">Center</SelectItem>
+                                <SelectItem value="right">Right</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -392,7 +412,7 @@ async function refreshAndLoad(id: number) {
                         <div className="grid grid-cols-2 gap-x-2 text-xs text-gray-500 dark:text-gray-400 mb-3">
                           <div>
                             <p className="font-semibold">Price</p>
-                            <p className="text-sm font-medium dark:text-gray-300">${grouping.price.toFixed(2)}</p>
+                            <p className="text-sm font-medium dark:text-gray-300"> {grouping.price != null ? `$${grouping.price.toFixed(2)}` : '—'} </p>
                           </div>
                           <div>
                             <p className="font-semibold">Group Size</p>

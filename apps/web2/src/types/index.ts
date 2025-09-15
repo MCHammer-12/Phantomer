@@ -1,29 +1,39 @@
-export type Section = "Left" | "Center" | "Right";
+export type Section = "left" | "center" | "right";
 
 export interface Event {
   id: number;
   eventName: string;
-  eventUrl: string;
   dateCreated: string;
   groupings: Grouping[];
+  groupCount?: number;
+
+  // Canonical identifiers for seat map URL
+  eventUrl?: string;       // for EventCard link
+  performanceId?: string;  // derived by backend
+  screenId?: number;
+  facilityId?: number;
+
+  // Optional legacy field for any old UI that still references it
+  // eventUrl?: string;
 }
 
 export interface Grouping {
   id: number;
-  eventId: number;
+  eventId?: number;
   section: Section;
   row: string;
-  price: number;
+  price: number | null;
   groupSize: number;
   isAvailable: boolean;
-  groupsFound: number;
+  groupsFound?: number;
 }
 
 export interface EventFormData {
   eventName: string;
-  eventUrl: string;
+  eventUrl: string;      // user-provided URL; backend extracts performanceId
+  screenId: number;      // 1..5 (Floor Section)
   row: string;
-  section: Section;
+  section: Section;      // 'left' | 'center' | 'right'
   price: number;
   groupSize: number;
   tag?: string;

@@ -15,44 +15,51 @@ enum UserType {
   ADMIN
 }
 
-
 model User {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email        String   @unique
   userType     UserType @map("user_type")
-  passwordHash String  @map("password_hash")
-  salt 		     String 	@map("salt")
+  passwordHash String   @map("password_hash")
+  salt         String   @map("salt")
   createdAt    DateTime @default(now()) @map("created_at")
-
 
   @@map("users")
 }
 
 model Event {
-  id         Int      @id @default(autoincrement())
-  name       String
-  sourceUrl  String
-  row        String?
-  section    String?
-  groupSize  Int?
-  expectedPrice  Float?
-  createdAt  DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  name          String
+
+  eventUrl      String            // backlink for UI (card title)
+  performanceId String            // derived from eventUrl (last 5 digits)
+  screenId      Int               // 1..5
+  facilityId    Int      @default(487)
+
+  // sourceUrl     String            // <— keep this for your external fetch scripts
+
+  row           String?
+  section       String?
+  groupSize     Int?
+  expectedPrice Float?
+
+  groupCount    Int?     @default(0)
+  createdAt     DateTime @default(now())
 
   seats      EventSeat[]
   zonePrices EventZonePrice[]
 }
 
 model EventSeat {
-  id         Int    @id @default(autoincrement())
-  seatNo     Int
-  seatStatus String
-  seatType   String
-  zoneLabel  String
-  price      Float
-  isvalid       Boolean @default(false)
-  groupChecked  Boolean @default(false)
-  eventId    Int
-  event      Event @relation(fields: [eventId], references: [id])
+  id           Int     @id @default(autoincrement())
+  seatNo       Int
+  seatStatus   String
+  seatType     String
+  zoneLabel    String
+  price        Float
+  isvalid      Boolean @default(false)
+  groupChecked Boolean @default(false)
+  eventId      Int
+  event        Event   @relation(fields: [eventId], references: [id])
 }
 
 model EventZonePrice {
@@ -64,12 +71,12 @@ model EventZonePrice {
 }
 
 model SeatMapping {
-  seat_no        Int     @id @unique // Primary key, unique seat number
-  row            String  // The row the seat is in
-  adjacent_seats Int[]   // List of adjacent seat_no values
+  seat_no        Int    @id @unique // Primary key, unique seat number
+  row            String // The row the seat is in
+  adjacent_seats Int[]  // List of adjacent seat_no values
   section        String? // The section a seat is in
 
-  @@map("SeatMapping") // it wasn't recognizing the table so chatgpt told me to add this
+  @@map("SeatMapping")
 }
 
 model Metadata {

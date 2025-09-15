@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { XMLParser } from 'fast-xml-parser';
 import { PrismaClient } from '@prisma/client';
-console.log('HTTP_PROXY=', process.env.HTTP_PROXY, 'HTTPS_PROXY=', process.env.HTTPS_PROXY);
 
 interface XmlZone {
   zone_color?: string;
@@ -17,8 +15,6 @@ interface XmlSeat {
   CustomFill?: string;
 }
 
-
-
 @Injectable()
 export class XMLFetcherService {
   private readonly logger = new Logger(XMLFetcherService.name);
@@ -26,21 +22,44 @@ export class XMLFetcherService {
 
   private readonly SCRAPFLY_KEY = process.env.SCRAPFLY_KEY ?? '';
   private readonly SCRAPFLY_ENABLED = (process.env.SCRAPFLY_ENABLED ?? '0') === '1';
-  private readonly SCRAPFLY_ESCALATE = (process.env.SCRAPFLY_ESCALATE ?? '0') === '1'; // allow ASP escalation if cheap tier fails
-  private readonly SCRAPFLY_COST_BUDGET_CHEAP = process.env.SCRAPFLY_COST_BUDGET_CHEAP ?? '1'; // 1 credit
+  private readonly SCRAPFLY_ESCALATE = (process.env.SCRAPFLY_ESCALATE ?? '0') === '1';
+  private readonly SCRAPFLY_COST_BUDGET_CHEAP = process.env.SCRAPFLY_COST_BUDGET_CHEAP ?? '1';
   private readonly SCRAPFLY_COST_BUDGET_ASP = process.env.SCRAPFLY_COST_BUDGET_ASP ?? '30';
 
-  // simple in-memory cache and inflight de-duplication per normalized URL
   private memCache = new Map<string, { expires: number; body: string }>();
   private inflight = new Map<string, Promise<string>>();
+
+  private buildUrl(performanceId: string, screenId: number, facilityId = 487): string {
+    // Basic input validation
+    if (performanceId == null) {
+      throw new Error("performanceId must not be null or undefined");
+    }
+    const pid = performanceId.trim();
+    if (!/^[A-Za-z0-9]{5}$/.test(pid)) {
+      throw new Error(`performanceId must be exactly 5 alphanumeric characters (got "${performanceId}")`);
+    }
+
+    if (screenId == null || Number.isNaN(Number(screenId))) {
+      throw new Error("screenId must be a number in [1..5]");
+    }
+    const sid = Number(screenId);
+    if (sid < 1 || sid > 5) {
+      throw new Error(`screenId must be between 1 and 5 (got ${screenId})`);
+    }
+
+    const fid = facilityId ?? 487;
+
+    return `https://my.arttix.org/api/syos/GetSeatList?performanceId=${encodeURIComponent(pid)}&facilityId=${fid}&screenId=${sid}`;
+  }
 
   private normalizeUrl(url: string): string {
     try {
       const u = new URL(url);
       u.hash = '';
-      // sort query params for stable keys
-      const entries = [...u.searchParams.entries()].sort(([a],[b]) => a.localeCompare(b));
-      u.search = entries.length ? '?' + entries.map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&') : '';
+      const entries = [...u.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b));
+      u.search = entries.length
+        ? '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+        : '';
       u.hostname = u.hostname.toLowerCase();
       return u.toString();
     } catch {
@@ -48,11 +67,14 @@ export class XMLFetcherService {
     }
   }
 
-  private getCached(url: string, ttlMs = 60_000): string | null {
+  private getCached(url: string): string | null {
     const key = this.normalizeUrl(url);
     const v = this.memCache.get(key);
     if (!v) return null;
-    if (Date.now() > v.expires) { this.memCache.delete(key); return null; }
+    if (Date.now() > v.expires) {
+      this.memCache.delete(key);
+      return null;
+    }
     return v.body;
   }
 
@@ -71,14 +93,15 @@ export class XMLFetcherService {
   }
 
   private async fetchXmlViaScrapfly(url: string, signal: AbortSignal): Promise<string> {
-    // If Scrapfly disabled, fall back to direct fetch
     if (!this.SCRAPFLY_ENABLED || !this.SCRAPFLY_KEY) {
-      const resp = await fetch(url, { signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/xml,text/xml,*/*' } });
+      const resp = await fetch(url, {
+        signal,
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/xml,text/xml,*/*' },
+      });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       return await resp.text();
     }
 
-    // Tier 1: cheapest – datacenter, no browser, no ASP
     const sp1 = new URLSearchParams();
     sp1.set('url', url);
     sp1.set('key', this.SCRAPFLY_KEY);
@@ -88,17 +111,19 @@ export class XMLFetcherService {
     sp1.set('proxified_response', 'true');
     sp1.set('cache', 'true');
     sp1.set('cache_ttl', '300');
-    sp1.set('cost_budget', this.SCRAPFLY_COST_BUDGET_CHEAP); // 1 credit
-    let resp = await fetch(`https://api.scrapfly.io/scrape?${sp1.toString()}`, { method: 'GET', signal, headers: { 'Accept': 'application/xml,text/xml,*/*' } });
+    sp1.set('cost_budget', this.SCRAPFLY_COST_BUDGET_CHEAP);
+    let resp = await fetch(`https://api.scrapfly.io/scrape?${sp1.toString()}`, {
+      method: 'GET',
+      signal,
+      headers: { Accept: 'application/xml,text/xml,*/*' },
+    });
     if (resp.ok) return await resp.text();
 
-    // If not allowed to escalate, throw
     if (!this.SCRAPFLY_ESCALATE) {
       const cost = resp.headers.get('X-Scrapfly-Api-Cost');
       throw new Error(`Scrapfly cheap-tier failed (cost=${cost || '?'}) HTTP ${resp.status}`);
     }
 
-    // Tier 2: ASP auto (may add browser/residential as needed)
     const sp2 = new URLSearchParams();
     sp2.set('url', url);
     sp2.set('key', this.SCRAPFLY_KEY);
@@ -110,7 +135,11 @@ export class XMLFetcherService {
     sp2.set('session_sticky_proxy', 'true');
     sp2.set('cost_budget', this.SCRAPFLY_COST_BUDGET_ASP);
 
-    resp = await fetch(`https://api.scrapfly.io/scrape?${sp2.toString()}`, { method: 'GET', signal, headers: { 'Accept': 'application/xml,text/xml,*/*' } });
+    resp = await fetch(`https://api.scrapfly.io/scrape?${sp2.toString()}`, {
+      method: 'GET',
+      signal,
+      headers: { Accept: 'application/xml,text/xml,*/*' },
+    });
     if (!resp.ok) {
       const cost = resp.headers.get('X-Scrapfly-Api-Cost');
       throw new Error(`Scrapfly ASP-tier failed (cost=${cost || '?'}) HTTP ${resp.status}`);
@@ -122,258 +151,277 @@ export class XMLFetcherService {
     const cached = this.getCached(url);
     if (cached) return cached;
     const body = await this.fetchOncePerUrl(url, (u) => this.fetchXmlViaScrapfly(u, signal));
-    // store a short TTL to avoid repeated credits within the same run
     this.setCached(url, body, 60_000);
     return body;
   }
 
   private async processXmlForEvent(
     xmlText: string,
-    eventName: string,
-    eventUrl: string,
     eventId: number,
+    eventName: string,
     eventRow?: string,
     eventSection?: string,
     eventGroupSize?: number,
     expectedPrice?: number
-  ): Promise<void> {
-      /* ───────────────────────── parse XML ───────────────────────── */
-      const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
-      const parsedData: any = parser.parse(xmlText);
-      const root = parsedData.TNSyosSeatDetails || parsedData;
+  ): Promise<number> {
+    const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
+    const parsedData: any = parser.parse(xmlText);
+    const root = parsedData.TNSyosSeatDetails || parsedData;
 
-      /* ─────────────── build zone-price lookup ─────────────── */
-      const zoneColors: XmlZone[] = root.ZoneColorList?.XmlZone
-        ? Array.isArray(root.ZoneColorList.XmlZone)
-          ? root.ZoneColorList.XmlZone
-          : [root.ZoneColorList.XmlZone]
-        : [];
+    const zoneColors: XmlZone[] = root.ZoneColorList?.XmlZone
+      ? Array.isArray(root.ZoneColorList.XmlZone)
+        ? root.ZoneColorList.XmlZone
+        : [root.ZoneColorList.XmlZone]
+      : [];
 
-      const zonePriceData = zoneColors.map((z) => ({
-        zoneColor: z.zone_color?.toLowerCase().trim() || '',
-        price: parseFloat(z.price || '0'),
+    const zonePriceData = zoneColors.map((z) => ({
+      zoneColor: z.zone_color?.toLowerCase().trim() || '',
+      price: parseFloat(z.price || '0'),
+      eventId,
+    }));
+
+    const seats: XmlSeat[] = root.seats?.TNSyosSeat
+      ? Array.isArray(root.seats.TNSyosSeat)
+        ? root.seats.TNSyosSeat
+        : [root.seats.TNSyosSeat]
+      : [];
+
+    const seatData = seats.map((seat) => {
+      const match = zonePriceData.find((z) => z.zoneColor === seat.CustomFill?.toLowerCase().trim());
+      return {
+        isvalid: false,
+        seatNo: seat.seat_no ? Number(seat.seat_no) : 0,
+        seatStatus: seat.seat_status?.toString() || '',
+        seatType: seat.seat_type?.toString() || '',
+        zoneLabel: seat.ZoneLabel?.toString() || '',
+        price: match ? match.price : 0,
         eventId,
-      }));
+        groupChecked: false,
+      };
+    });
 
-      /* ─────────────── extract seats ─────────────── */
-      const seats: XmlSeat[] = root.seats?.TNSyosSeat
-        ? Array.isArray(root.seats.TNSyosSeat)
-          ? root.seats.TNSyosSeat
-          : [root.seats.TNSyosSeat]
-        : [];
+    this.logger.debug(`Raw seats parsed: ${seatData.length}`);
 
-      const seatData = seats.map((seat) => {
-        const match = zonePriceData.find(
-          (z) => z.zoneColor === seat.CustomFill?.toLowerCase().trim()
-        );
-        return {
-          isvalid: false,
-          seatNo: seat.seat_no ? Number(seat.seat_no) : 0,
-          seatStatus: seat.seat_status?.toString() || '',
-          seatType: seat.seat_type?.toString() || '',
-          zoneLabel: seat.ZoneLabel?.toString() || '',
-          price: match ? match.price : 0,
-          eventId,
-          groupChecked: false
-        };
+    let validGroupCount = 0;
+    const SeatMapping = await this.prisma.seatMapping.findMany();
+
+    if (eventRow && eventSection) {
+      seatData.forEach((seat) => {
+        const mapping = SeatMapping.find((m) => m.seat_no === seat.seatNo);
+        if (!['0'].includes(seat.seatStatus)) {
+          this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatStatus ${seat.seatStatus}`);
+          return;
+        }
+        if (seat.seatType !== '1') {
+          this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatType ${seat.seatType}`);
+          return;
+        }
+        if (typeof expectedPrice === 'number' && seat.price > expectedPrice) {
+          this.logger.debug(`Seat ${seat.seatNo} rejected: price ${seat.price} exceeds expected max ${expectedPrice}`);
+          return;
+        }
+
+        if (eventSection && mapping?.section?.toLowerCase().trim() !== eventSection.toLowerCase().trim()) {
+          this.logger.debug(`Seat ${seat.seatNo} rejected: section mismatch (found ${mapping?.section}, expected ${eventSection})`);
+          return;
+        }
+        if (!mapping || !mapping.row) {
+          this.logger.debug(`Seat ${seat.seatNo} rejected: no seat mapping or row`);
+          return;
+        }
+        if (!this.isRowInFrontOrEqual(mapping.row, eventRow)) {
+          this.logger.debug(`Seat ${seat.seatNo} rejected: row ${mapping.row} is behind target ${eventRow}`);
+          return;
+        }
+        seat.isvalid = true;
       });
+    }
 
-      // troubleshooting: logging the amount of parsed seats
-      this.logger.debug(`Raw seats parsed: ${seatData.length}`);
+    const validBeforeGroup = seatData.filter((s) => s.isvalid).length;
+    this.logger.debug(`Seats valid before group filtering: ${validBeforeGroup}`);
 
-      // Set Valid Groups to 0
-      let validGroupCount = 0;
-
-      const SeatMapping = await this.prisma.seatMapping.findMany();
-
-      if (eventRow && eventSection) {
-        seatData.forEach((seat)=>{
-          const mapping = SeatMapping.find((m) => m.seat_no === seat.seatNo);
-          if (!['0'].includes(seat.seatStatus)) { this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatStatus ${seat.seatStatus}`); return; }
-          if (seat.seatType !== '1') { this.logger.debug(`Seat ${seat.seatNo} rejected: invalid seatType ${seat.seatType}`); return; }
-          if (seat.price !== expectedPrice) { this.logger.debug(`Seat ${seat.seatNo} rejected: price mismatch (found ${seat.price}, expected ${expectedPrice})`); return; }
-          if (eventSection && mapping?.section?.toLowerCase().trim() !== eventSection.toLowerCase().trim()) { this.logger.debug(`Seat ${seat.seatNo} rejected: section mismatch (found ${mapping?.section}, expected ${eventSection})`); return; }
-          if (!mapping || !mapping.row) { this.logger.debug(`Seat ${seat.seatNo} rejected: no seat mapping or row`); return; }
-          if (!this.isRowInFrontOrEqual(mapping.row, eventRow)) { this.logger.debug(`Seat ${seat.seatNo} rejected: row ${mapping.row} is behind target ${eventRow}`); return; }
-          seat.isvalid = true;
-        });
-      }
-
-      const validBeforeGroup = seatData.filter(s => s.isvalid).length;
-      this.logger.debug(`Seats valid before group filtering: ${validBeforeGroup}`);
-
-      if (eventGroupSize && eventGroupSize > 1) {
-        seatData.forEach((s) => (s.groupChecked = false));
-        for (const seat of seatData) {
-          if (!seat.isvalid || seat.groupChecked) continue;
-          validGroupCount++;
-          const group = [seat];
-          seat.groupChecked = true;
-          const queue = [seat];
-          while (queue.length > 0) {
-            const current = queue.shift();
-            if (!current) continue;
-            const mapping = SeatMapping.find((m) => m.seat_no === current.seatNo);
-            if (!mapping || !mapping.adjacent_seats) continue;
-            const adjacentSeatNos = mapping.adjacent_seats;
-            for (const adjacentNo of adjacentSeatNos) {
-              const adjacentSeat = seatData.find((s) => s.seatNo === adjacentNo && s.isvalid && !s.groupChecked);
-              if (adjacentSeat) {
-                adjacentSeat.groupChecked = true;
-                group.push(adjacentSeat);
-                queue.push(adjacentSeat);
-              }
+    if (eventGroupSize && eventGroupSize > 1) {
+      seatData.forEach((s) => (s.groupChecked = false));
+      for (const seat of seatData) {
+        if (!seat.isvalid || seat.groupChecked) continue;
+        validGroupCount++;
+        const group = [seat];
+        seat.groupChecked = true;
+        const queue = [seat];
+        while (queue.length > 0) {
+          const current = queue.shift();
+          if (!current) continue;
+          const mapping = SeatMapping.find((m) => m.seat_no === current.seatNo);
+          if (!mapping || !mapping.adjacent_seats) continue;
+          const adjacentSeatNos = mapping.adjacent_seats;
+          for (const adjacentNo of adjacentSeatNos) {
+            const adjacentSeat = seatData.find((s) => s.seatNo === adjacentNo && s.isvalid && !s.groupChecked);
+            if (adjacentSeat) {
+              adjacentSeat.groupChecked = true;
+              group.push(adjacentSeat);
+              queue.push(adjacentSeat);
             }
           }
-          if (group.length < eventGroupSize) { group.forEach((s) => (s.isvalid = false)); }
+        }
+        if (group.length < eventGroupSize) {
+          group.forEach((s) => (s.isvalid = false));
         }
       }
+    }
 
-      const validAfterGroup = seatData.filter(s => s.isvalid).length;
-      this.logger.debug(`Seats valid after group filtering: ${validAfterGroup}`);
+    const validAfterGroup = seatData.filter((s) => s.isvalid).length;
+    this.logger.debug(`Seats valid after group filtering: ${validAfterGroup}`);
 
-      await this.storeData(eventId, zonePriceData, seatData);
+    await this.storeData(eventId, zonePriceData, seatData);
 
-      if (!eventGroupSize || eventGroupSize <= 1) {
-        validGroupCount = seatData.filter(s => s.isvalid).length;
-      }
-      this.logger.debug(`Counted ${validGroupCount} valid groups (no grouping logic)`);
+    if (!eventGroupSize || eventGroupSize <= 1) {
+      validGroupCount = seatData.filter((s) => s.isvalid).length;
+    }
+    this.logger.debug(`Counted ${validGroupCount} valid groups`);
 
-      const summaryMessage = validGroupCount === 0
-        ? 'This ticket grouping is no longer available'
-        : `This ticket grouping is still available\n# of groups: ${validGroupCount}`;
-      this.logger.log(summaryMessage);
-      this.logger.log(`Event ID ${eventId}: ${seatData.length} seats stored`);
+    try {
+      await this.prisma.event.update({
+        where: { id: eventId },
+        data: { groupCount: validGroupCount },
+      });
+    } catch (e: any) {
+      this.logger.error(`Failed to persist groupCount for event ${eventId}: ${e?.message ?? e}`);
+    }
+    return validGroupCount;
   }
 
   private isRowInFrontOrEqual(seatRow: string, targetRow: string): boolean {
     const rowOrder = ['AAA', 'BBB', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
-    
     const normalize = (r: string) => r.trim().toUpperCase();
-  
     const seatIndex = rowOrder.indexOf(normalize(seatRow));
     const targetIndex = rowOrder.indexOf(normalize(targetRow));
-  
-    if (seatIndex === -1 || targetIndex === -1) return false; // If row not in list, fail
-  
+    if (seatIndex === -1 || targetIndex === -1) return false;
     return seatIndex <= targetIndex;
   }
 
-  private async fetchAndStoreXML(
-    eventName: string,
-    eventUrl: string,
+  /**
+   * Try to fetch & process once for a given performanceId value.
+   * Returns the processed group count on success.
+   */
+  private async tryFetchProcess(
+    name: string,
     eventId: number,
-    eventRow?: string,
-    eventSection?: string,
-    eventGroupSize?: number,
+    performanceId: string,
+    screenId: number,
+    facilityId: number,
+    row?: string,
+    section?: string,
+    groupSize?: number,
     expectedPrice?: number
-  ): Promise<void> {
-    /* ───────────────────────── timeout guard ───────────────────────── */
+  ): Promise<number> {
+    const url = this.buildUrl(performanceId, screenId, facilityId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 130_000);
-
     try {
-      this.logger.log(`Fetching XML for ${eventName} (ID: ${eventId})`);
-      if (expectedPrice === undefined) {
-        this.logger.error(`❌ Missing expectedPrice for event ${eventId} — all seats will fail price validation`);
-      }
-
-      const xmlText = await this.fetchXml(eventUrl, controller.signal);
+      const xmlText = await this.fetchXml(url, controller.signal);
       clearTimeout(timeout);
-
-      await this.processXmlForEvent(
+      return await this.processXmlForEvent(
         xmlText,
-        eventName,
-        eventUrl,
         eventId,
-        eventRow,
-        eventSection,
-        eventGroupSize,
+        name,
+        row,
+        section,
+        groupSize,
         expectedPrice
       );
-    } catch (err: any) {
+    } finally {
       clearTimeout(timeout);
-      this.logger.error(
-        `Fetch failed for ${eventName}: ${err?.cause?.code ?? err.message}`
-      );
     }
   }
 
+  private async fetchAndStoreForEvent(eventId: number): Promise<number> {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) {
+      this.logger.error(`Event ${eventId} not found`);
+      return 0;
+    }
 
+    if (!event.performanceId || event.screenId == null) {
+      this.logger.error(`Event ${eventId} missing performanceId or screenId`);
+      return 0;
+    }
 
-  private async storeData(
-    eventId: number,
-    zonePriceData: any[],
-    seatData: any[]
-  ) {
+    const facilityId = event.facilityId ?? 487;
+    const basePidRaw = String(event.performanceId).trim();
+    const isNumeric = /^\d+$/.test(basePidRaw);
+
+    this.logger.log(`Fetching XML for ${event.name} (ID: ${event.id}) with PID ${basePidRaw} (screenId=${event.screenId}, facilityId=${facilityId})`);
+    if (event.expectedPrice === undefined || event.expectedPrice === null) {
+      this.logger.warn(`⚠️ Missing expectedPrice for event ${event.id} — price validation may drop all seats`);
+    }
+
+    // Attempt base performanceId, then increment up to +10 if HTTP errors occur
+    const maxIncrement = 10;
+    const basePidNum = isNumeric ? Number(basePidRaw) : NaN;
+
+    for (let delta = 0; delta <= (isNumeric ? maxIncrement : 0); delta++) {
+      const candidatePid = isNumeric ? String(basePidNum + delta) : basePidRaw;
+      try {
+        if (delta > 0) {
+          this.logger.warn(`Base PID failed; retrying with PID=${candidatePid} (attempt ${delta + 1}/${maxIncrement + 1}) for event ${event.id}`);
+        }
+        const groups = await this.tryFetchProcess(
+          event.name,
+          event.id,
+          candidatePid,
+          Number(event.screenId),
+          facilityId,
+          event.row || undefined,
+          event.section || undefined,
+          event.groupSize || undefined,
+          event.expectedPrice || undefined
+        );
+        this.logger.log(`Fetch OK for event ${event.id} using PID=${candidatePid} → groups=${groups}`);
+        return groups;
+      } catch (err: any) {
+        // Only continue loop on HTTP/network errors; other exceptions will also retry until maxIncrement
+        const msg = err?.message ?? String(err);
+        this.logger.error(`Fetch attempt with PID=${candidatePid} failed for event ${event.id}: ${msg}`);
+        // proceed to next delta if available
+        if (delta === (isNumeric ? maxIncrement : 0)) {
+          // No more retries
+          break;
+        }
+      }
+    }
+
+    // All attempts failed
+    return 0;
+  }
+
+  private async storeData(eventId: number, zonePriceData: any[], seatData: any[]) {
     await this.prisma.$transaction([
       this.prisma.eventZonePrice.deleteMany({ where: { eventId } }),
       this.prisma.eventSeat.deleteMany({ where: { eventId } }),
     ]);
-    if (zonePriceData.length)
-      await this.prisma.eventZonePrice.createMany({ data: zonePriceData });
-    if (seatData.length)
-      await this.prisma.eventSeat.createMany({ data: seatData });
+    if (zonePriceData.length) await this.prisma.eventZonePrice.createMany({ data: zonePriceData });
+    if (seatData.length) await this.prisma.eventSeat.createMany({ data: seatData });
   }
 
-  private isworking = false
+  private isworking = false;
 
-  // @Cron('*/12 * * * * *')
-  // async handleCron() {
-  //   if (this.isworking) return
-  //   this.isworking = true
-  //   this.logger.log('Executing scheduled XML fetch…');
-  //   const events = await this.prisma.event.findMany();
-  //   for (const e of events) {
-  //     await this.fetchAndStoreXML(
-  //       e.name,
-  //       e.sourceUrl,
-  //       e.id,
-  //       e.row || undefined,
-  //       e.section || undefined,
-  //       e.groupSize || undefined,
-  //       e.expectedPrice || undefined
-  //     );
-  //   }
-  //   this.isworking = false
-  // }
-async runOnce(): Promise<{ successOccurred: boolean; errorsOccurred: boolean }> {
+  async runOnce(): Promise<{ successOccurred: boolean; errorsOccurred: boolean }> {
     if (this.isworking) return { successOccurred: false, errorsOccurred: false };
     this.isworking = true;
     this.logger.log('Executing one-time XML fetch…');
-    let errorsOccurred = false;
 
-    const events = await this.prisma.event.findMany();
+    let errorsOccurred = false;
     let successOccurred = false;
 
-    const byUrl = new Map<string, typeof events>();
-    for (const e of events) {
-      const key = this.normalizeUrl(e.sourceUrl);
-      const arr = byUrl.get(key) ?? [];
-      arr.push(e);
-      byUrl.set(key, arr);
-    }
+    const events = await this.prisma.event.findMany();
 
-    for (const [url, group] of byUrl) {
+    for (const e of events) {
       try {
-        // Fetch XML once per distinct URL (cached/inflight aware)
-        const controller = new AbortController();
-        const xmlText = await this.fetchXml(url, controller.signal);
-        for (const e of group) {
-          await this.processXmlForEvent(
-            xmlText,
-            e.name,
-            e.sourceUrl,
-            e.id,
-            e.row || undefined,
-            e.section || undefined,
-            e.groupSize || undefined,
-            e.expectedPrice || undefined
-          );
-          successOccurred = true;
-        }
+        const gc = await this.fetchAndStoreForEvent(e.id);
+        this.logger.log(`# of groups (persisted) for event ${e.id}: ${gc}`);
+        successOccurred = true;
       } catch (err: any) {
-        this.logger.error(`Error fetching group url ${url}: ${err?.message ?? err}`);
+        this.logger.error(`Error fetching event ${e.id}: ${err?.message ?? err}`);
         errorsOccurred = true;
       }
     }
@@ -394,28 +442,15 @@ async runOnce(): Promise<{ successOccurred: boolean; errorsOccurred: boolean }> 
     this.isworking = false;
     return { successOccurred, errorsOccurred };
   }
-  
-  /**
-   * Fetch and store reservations for a single event by ID.
-   */
-  async fetchSingleEvent(eventId: number): Promise<void> {
+
+  async fetchSingleEvent(eventId: number): Promise<number> {
     try {
-      const event = await this.prisma.event.findUnique({ where: { id: eventId } });
-      if (!event) {
-        this.logger.error(`Event ${eventId} not found`);
-        return;
-      }
-      await this.fetchAndStoreXML(
-        event.name,
-        event.sourceUrl,
-        event.id,
-        event.row || undefined,
-        event.section || undefined,
-        event.groupSize || undefined,
-        event.expectedPrice || undefined
-      );
+      const gc = await this.fetchAndStoreForEvent(eventId);
+      this.logger.log(`# of groups (persisted): ${gc}`);
+      return gc;
     } catch (err: any) {
       this.logger.error(`Error in fetchSingleEvent(${eventId}): ${err.message}`);
+      return 0;
     }
   }
 }
