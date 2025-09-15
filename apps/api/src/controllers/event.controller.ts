@@ -113,6 +113,7 @@ export class EventController {
             price: e.expectedPrice,
             groupSize: size,
             isAvailable,
+            groupsFound: e.groupCount ?? 0,
           };
           return {
             id: e.id,
@@ -165,6 +166,7 @@ export class EventController {
           price: e.expectedPrice,
           groupSize: size,
           isAvailable,
+          groupsFound: e.groupCount ?? 0,
         },
       ],
     };
@@ -242,6 +244,7 @@ export class EventController {
           price: updated.expectedPrice,
           groupSize: size,
           isAvailable,
+          groupsFound: updated.groupCount ?? 0,
         },
       ],
     };
