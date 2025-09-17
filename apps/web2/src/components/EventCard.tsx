@@ -6,7 +6,9 @@ import {
   Edit, 
   Trash2,
   Save,
-  X 
+  X,
+  RefreshCcw,
+  Loader2
 } from "lucide-react";
 import GroupingStatus from "./GroupingStatus";
 import { formatDate } from "@/lib/utils";
@@ -51,6 +53,7 @@ export default function EventCard({ event, onDelete }: EventCardProps) {
   );
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [justRefreshed, setJustRefreshed] = useState(false);
 
 function delay(ms: number) { return new Promise(res => setTimeout(res, ms)); }
 
@@ -89,6 +92,9 @@ async function refreshAndLoad(id: number) {
         }
         return old;
       });
+      // flash the card to indicate a successful refresh
+      setJustRefreshed(true);
+      setTimeout(() => setJustRefreshed(false), 3000);
     }
   } finally {
     setIsRefreshing(false);
@@ -254,7 +260,23 @@ async function refreshAndLoad(id: number) {
 
   return (
     <>
-      <div className="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden mb-4">
+      <div
+        className={"bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden mb-4 transition-colors relative"}
+      >
+        {justRefreshed && (
+          <>
+            <style>{`
+              @keyframes eventCardFlash {
+                from { opacity: 0.85; }
+                to { opacity: 0; }
+              }
+            `}</style>
+            <div
+              className="pointer-events-none absolute inset-0 bg-white"
+              style={{ animation: "eventCardFlash 3s ease-out forwards" }}
+            />
+          </>
+        )}
         <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700">
           <div className="flex justify-between items-start">
             <div>
@@ -293,6 +315,24 @@ async function refreshAndLoad(id: number) {
               >
                 Groups: {groupsFound}
               </span>
+
+              {/* Single-event refresh */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 h-7 w-7"
+                onClick={() => refreshAndLoad(currentEvent.id)}
+                disabled={isRefreshing}
+                title="Refresh this event"
+              >
+                {isRefreshing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+              </Button>
+
+              {/* Delete event */}
               <Button
                 variant="ghost"
                 size="icon"
