@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 export default {
-  darkMode: ["class"],
+  darkMode: "class",
   content: ["./index.html", "./src/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
@@ -60,6 +60,23 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
+        },
+        // Brand palette (from design spec)
+        brand: {
+          anti: "#F0F0F2",       // Anti-flash white
+          slate: "#798aa7ff",      // Slate gray
+          outer: "#252728ff",      // Outer space
+          prussian: "#132a42ff",   // Prussian blue (primary accent)
+          black: "#000000",      // Black
+        },
+        // Status colors (keep green/red for availability & delete)
+        success: {
+          DEFAULT: "#16A34A", // Tailwind green-600 equivalent
+          foreground: "#FFFFFF",
+        },
+        danger: {
+          DEFAULT: "#DC2626", // Tailwind red-600 equivalent
+          foreground: "#FFFFFF",
         },
       },
       keyframes: {

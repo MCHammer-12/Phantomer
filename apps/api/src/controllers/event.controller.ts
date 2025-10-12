@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Get, Delete, Param, Patch, BadRequestException, NotFoundException, HttpException } from '@nestjs/common';
+import { Body, Controller, Post, Get, Delete, Param, Patch, BadRequestException, NotFoundException, HttpException, Query } from '@nestjs/common';
 import { XMLFetcherService } from '../services/xml-fetcher.service';
 import { PrismaClient } from '@prisma/client';
 
@@ -12,6 +12,7 @@ interface CreateEventDto {
   section: string;    // left|center|right
   groupSize: number;
   expectedPrice: number;
+  userTag?: string | null; // optional user identifier
 }
 
 function extractPerformanceIdFromUrl(url: string): string {
@@ -83,6 +84,7 @@ export class EventController {
           section: body.section.toLowerCase(),
           groupSize: body.groupSize,
           expectedPrice: body.expectedPrice,
+          userTag: body.userTag ?? null,
           // facilityId defaults to 487 (schema)
         },
       });
@@ -96,9 +98,11 @@ export class EventController {
   }
 
   @Get('all')
-  async getEvents() {
+  async getEvents(@Query('userTag') userTag?: string) {
     try {
-      const events = await prisma.event.findMany();
+      const events = await prisma.event.findMany({
+        where: userTag ? { userTag } : undefined,
+      });
       const eventsWithGroupings = await Promise.all(
         events.map(async (e) => {
           const size = e.groupSize ?? 1;
@@ -125,10 +129,11 @@ export class EventController {
             performanceId: e.performanceId,
             screenId: e.screenId,
             facilityId: e.facilityId,
+            userTag: e.userTag,
           };
         })
       );
-      return { events: eventsWithGroupings };
+      return eventsWithGroupings;
     } catch (error) {
       console.error('Error fetching events:', error);
       return { error: 'Failed to fetch events' };

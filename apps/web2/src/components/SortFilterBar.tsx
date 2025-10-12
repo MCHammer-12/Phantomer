@@ -25,22 +25,22 @@ export default function SortFilterBar({
   onFilterChange,
 }: SortFilterBarProps) {
   return (
-    <div className="bg-white dark:bg-neutral-800 shadow rounded-lg p-4 mb-6">
+    <div className="bg-brand-black text-card-foreground border border-border shadow rounded-lg p-4 mb-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold dark:text-white">Monitored Events</h2>
+        <h2 className="text-lg font-semibold text-card-foreground">Monitored Events</h2>
 
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative">
             <Select value={selectedSort} onValueChange={onSortChange}>
-              <SelectTrigger className="w-full sm:w-[180px] dark:bg-neutral-700 dark:text-white dark:border-gray-600">
+              <SelectTrigger className="w-full sm:w-[180px] bg-background text-foreground border-input">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
-              <SelectContent className="dark:bg-neutral-800 dark:border-gray-700">
+              <SelectContent className="bg-card border border-border">
                 {sortOptions.map((option) => (
                   <SelectItem 
                     key={option.value} 
                     value={option.value}
-                    className="dark:text-gray-200 dark:focus:bg-neutral-700 dark:data-[highlighted]:bg-neutral-700"
+                    className="text-foreground data-[highlighted]:bg-muted"
                   >
                     {option.label}
                   </SelectItem>

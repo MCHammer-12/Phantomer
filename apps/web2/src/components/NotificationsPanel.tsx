@@ -74,10 +74,10 @@ export default function NotificationsPanel({
   const startEditing = (grouping: Grouping) => {
     setEditingGroupingId(grouping.id);
     setEditFormData({
-      section: grouping.section as "Left" | "Center" | "Right",
+      section: (grouping.section?.toLowerCase() as GroupingUpdateData["section"]) ?? undefined,
       row: grouping.row,
-      price: grouping.price,
-      groupSize: grouping.groupSize
+      price: grouping.price ?? undefined,
+      groupSize: grouping.groupSize ?? undefined
     });
   };
 
@@ -174,9 +174,9 @@ export default function NotificationsPanel({
           className="relative rounded-full"
           aria-label="Notifications"
         >
-          <Bell className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+          <Bell className="h-5 w-5 text-muted-foreground" />
           {countUnavailableGroupings() > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="absolute -top-1 -right-1 bg-danger text-danger-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
               {countUnavailableGroupings()}
             </span>
           )}
@@ -207,21 +207,21 @@ export default function NotificationsPanel({
         {unavailableEvents.length === 0 ? (
           <div className="text-center py-8">
             <div className="text-4xl mb-4">🎉</div>
-            <h3 className="text-lg font-medium dark:text-gray-100">All clear!</h3>
-            <p className="text-gray-500 dark:text-gray-400">All your monitored tickets are currently available.</p>
+            <h3 className="text-lg font-medium text-card-foreground">All clear!</h3>
+            <p className="text-muted-foreground">All your monitored tickets are currently available.</p>
           </div>
         ) : (
           unavailableEvents.map(event => (
-            <div key={event.id} className="mb-6 border rounded-lg overflow-hidden">
+            <div key={event.id} className="mb-6 border border-border bg-card text-card-foreground rounded-lg overflow-hidden">
               <div 
-                className="flex justify-between items-center p-3 bg-slate-50 dark:bg-gray-800 cursor-pointer"
+                className="flex justify-between items-center p-3 bg-card text-card-foreground border-b border-border cursor-pointer"
                 onClick={() => toggleEventExpanded(event.id)}
               >
                 <div>
-                  <h3 className="font-medium dark:text-gray-100">{event.eventName}</h3>
+                  <h3 className="font-medium text-card-foreground">{event.eventName}</h3>
                   <a 
                     href={event.eventUrl} 
-                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                    className="text-xs text-primary hover:underline"
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
@@ -243,9 +243,9 @@ export default function NotificationsPanel({
                     <span className="text-xs">Delete All</span>
                   </Button>
                   {expandedEvents[event.id] ? (
-                    <ChevronUp className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    <ChevronUp className="h-5 w-5 text-muted-foreground" />
                   ) : (
-                    <ChevronDown className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                    <ChevronDown className="h-5 w-5 text-muted-foreground" />
                   )}
                 </div>
               </div>
@@ -259,25 +259,25 @@ export default function NotificationsPanel({
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-xs text-gray-500">Section</label>
+                            <label className="text-xs text-muted-foreground">Section</label>
                             <Select
                               value={editFormData.section}
-                              onValueChange={(value) => 
-                                setEditFormData({...editFormData, section: value as "Left" | "Center" | "Right"})
+                              onValueChange={(value) =>
+                                setEditFormData({ ...editFormData, section: value as GroupingUpdateData["section"] })
                               }
                             >
                               <SelectTrigger className="h-8 text-sm">
                                 <SelectValue placeholder="Select section" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Left">Left</SelectItem>
-                                <SelectItem value="Center">Center</SelectItem>
-                                <SelectItem value="Right">Right</SelectItem>
+                                <SelectItem value="left">Left</SelectItem>
+                                <SelectItem value="center">Center</SelectItem>
+                                <SelectItem value="right">Right</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
                           <div>
-                            <label className="text-xs text-gray-500">Row</label>
+                            <label className="text-xs text-muted-foreground">Row</label>
                             <Input
                               value={editFormData.row}
                               onChange={(e) => 
@@ -287,24 +287,32 @@ export default function NotificationsPanel({
                             />
                           </div>
                           <div>
-                            <label className="text-xs text-gray-500">Price</label>
+                            <label className="text-xs text-muted-foreground">Price</label>
                             <Input
                               type="number"
-                              value={editFormData.price}
-                              onChange={(e) => 
-                                setEditFormData({...editFormData, price: parseFloat(e.target.value)})
-                              }
+                              value={editFormData.price ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setEditFormData({
+                                  ...editFormData,
+                                  price: v === "" ? undefined : Number(v)
+                                });
+                              }}
                               className="h-8 text-sm"
                             />
                           </div>
                           <div>
-                            <label className="text-xs text-gray-500">Group Size</label>
+                            <label className="text-xs text-muted-foreground">Group Size</label>
                             <Input
                               type="number"
-                              value={editFormData.groupSize}
-                              onChange={(e) => 
-                                setEditFormData({...editFormData, groupSize: parseInt(e.target.value)})
-                              }
+                              value={editFormData.groupSize ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setEditFormData({
+                                  ...editFormData,
+                                  groupSize: v === "" ? undefined : parseInt(v, 10)
+                                });
+                              }}
                               className="h-8 text-sm"
                             />
                           </div>
@@ -332,31 +340,33 @@ export default function NotificationsPanel({
                       <div>
                         <div className="grid grid-cols-2 gap-2 mb-2">
                           <div>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">Section</span>
-                            <p className="text-sm font-medium dark:text-gray-200">{grouping.section}</p>
+                            <span className="text-xs text-muted-foreground">Section</span>
+                            <p className="text-sm font-medium text-foreground">{grouping.section?.charAt(0).toUpperCase() + grouping.section?.slice(1)}</p>
                           </div>
                           <div>
-                            <span className="text-xs text-gray-500">Row</span>
-                            <p className="text-sm font-medium">{grouping.row}</p>
+                            <span className="text-xs text-muted-foreground">Row</span>
+                            <p className="text-sm font-medium text-foreground">{grouping.row}</p>
                           </div>
                           <div>
-                            <span className="text-xs text-gray-500">Price</span>
-                            <p className="text-sm font-medium">${grouping.price.toFixed(2)}</p>
+                            <span className="text-xs text-muted-foreground">Price</span>
+                            <p className="text-sm font-medium text-foreground">
+                              {grouping.price == null ? "—" : `$${grouping.price.toFixed(2)}`}
+                            </p>
                           </div>
                           <div>
-                            <span className="text-xs text-gray-500">Group Size</span>
-                            <p className="text-sm font-medium">{grouping.groupSize}</p>
+                            <span className="text-xs text-muted-foreground">Group Size</span>
+                            <p className="text-sm font-medium text-foreground">{grouping.groupSize}</p>
                           </div>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-danger text-danger-foreground">
                             <X className="h-3 w-3 mr-1" /> Unavailable
                           </span>
                           <div className="flex space-x-1">
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2 text-blue-600"
+                              className="h-7 px-2 text-primary"
                               onClick={() => startEditing(grouping)}
                             >
                               <Edit className="h-3 w-3 mr-1" />
@@ -365,7 +375,7 @@ export default function NotificationsPanel({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2 text-red-600"
+                              className="h-7 px-2 text-danger"
                               onClick={() => handleDeleteGrouping(grouping.id)}
                             >
                               <Trash2 className="h-3 w-3 mr-1" />

@@ -15,7 +15,12 @@ const LCR_SECTIONS: { label: string; value: "left" | "center" | "right" }[] = [
   { label: "Right", value: "right" },
 ];
 
-export default function EventForm() {
+type EventFormProps = {
+  onSuccess?: () => Promise<void> | void;
+  currentUser?: string;
+};
+
+export default function EventForm({ onSuccess, currentUser }: EventFormProps) {
   const [name, setName] = useState("");
   const [eventUrl, setEventUrl] = useState("");
   const [screenId, setScreenId] = useState<number | null>(null); // Floor Section
@@ -47,6 +52,7 @@ export default function EventForm() {
           section,
           groupSize,
           expectedPrice: expectedPrice === "" ? undefined : Number(expectedPrice),
+          userTag: currentUser ?? null,
         }),
       });
 
@@ -60,6 +66,12 @@ export default function EventForm() {
         setSection("center");
         setGroupSize(1);
         setExpectedPrice("");
+
+        try {
+          await onSuccess?.();
+        } catch (_) {
+          // ignore callback errors to not block UX
+        }
 
         setTimeout(() => setSuccessMessage(""), 3000);
       } else {
@@ -75,7 +87,7 @@ export default function EventForm() {
     <div style={styles.container}>
       <h2
         style={{
-          color: "white",
+          color: "hsl(var(--foreground))",
           fontWeight: "bold",
           fontSize: "24px",
           textAlign: "center",
@@ -87,6 +99,9 @@ export default function EventForm() {
       >
         Event Form
       </h2>
+      <div style={{ width: "100%", maxWidth: 315, fontSize: 12, color: "#bbb", margin: "0 auto 8px", textAlign: "center" }}>
+        Creating for user: <span style={{ fontWeight: 600, color: "hsl(var(--foreground))" }}>{currentUser ?? "None selected"}</span>
+      </div>
 
       <input
         type="text"
@@ -117,9 +132,10 @@ export default function EventForm() {
                 width: "100%",
                 padding: "8px 10px",
                 borderRadius: 6,
-                border: "1px solid #ccc",
                 cursor: "pointer",
-                background: screenId === opt.id ? "#eee" : "white",
+                background: screenId === opt.id ? 'hsl(var(--primary))' : 'hsl(var(--secondary))',
+                color: screenId === opt.id ? 'hsl(var(--primary-foreground))' : 'hsl(var(--foreground))',
+                border: screenId === opt.id ? '2px solid hsl(var(--ring))' : '1px solid hsl(var(--border))',
                 fontSize: 14,
                 lineHeight: 1.2,
               }}
@@ -160,9 +176,10 @@ export default function EventForm() {
                 width: "100%",
                 padding: "8px 10px",
                 borderRadius: 6,
-                border: "1px solid #ccc",
                 cursor: "pointer",
-                background: section === opt.value ? "#eee" : "white",
+                background: section === opt.value ? 'hsl(var(--primary))' : 'hsl(var(--secondary))',
+                color: section === opt.value ? 'hsl(var(--primary-foreground))' : 'hsl(var(--foreground))',
+                border: section === opt.value ? '2px solid hsl(var(--ring))' : '1px solid hsl(var(--border))',
               }}
               aria-pressed={section === opt.value}
             >
@@ -209,7 +226,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: "16px",
     marginBottom: "16px",
     borderRadius: "5px",
-    border: "1px solid #ccc",
+    border: "1px solid hsl(var(--border))",
     textAlign: "left",
     boxSizing: "border-box",
   },
@@ -218,9 +235,9 @@ const styles: { [key: string]: React.CSSProperties } = {
     maxWidth: 285,
     padding: "10px",
     fontSize: "16px",
-    backgroundColor: "white",
-    color: "black",
-    border: "1px solid black",
+    backgroundColor: "hsl(var(--primary))",
+    color: "hsl(var(--primary-foreground))",
+    border: "1px solid hsl(var(--ring))",
     borderRadius: "5px",
     cursor: "pointer",
     textAlign: "center",

@@ -4,9 +4,11 @@ To do:
 
 2. Edit existing listings on EventCard (works)
 
-3. Check prisma migration - it's showing that it's not in sync (idk)
+3. Check prisma migration - it's showing that it's not in sync (done)
 
-4. number of groups available on eventcard
+4. number of groups available on eventcard (done)
+
+5. add screen id 1-5
 
 5. group together listings of the same url
 

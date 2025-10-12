@@ -261,7 +261,7 @@ async function refreshAndLoad(id: number) {
   return (
     <>
       <div
-        className={"bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden mb-4 transition-colors relative"}
+        className={"bg-card text-card-foreground border border-border shadow rounded-lg overflow-hidden mb-4 transition-colors relative"}
       >
         {justRefreshed && (
           <>
@@ -272,15 +272,15 @@ async function refreshAndLoad(id: number) {
               }
             `}</style>
             <div
-              className="pointer-events-none absolute inset-0 bg-white"
+              className="pointer-events-none absolute inset-0 bg-background"
               style={{ animation: "eventCardFlash 3s ease-out forwards" }}
             />
           </>
         )}
-        <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+        <div className="px-6 py-4 border-b border-border">
           <div className="flex justify-between items-start">
             <div>
-              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+              <h3 className="text-lg font-semibold text-card-foreground">
                 {currentEvent.eventUrl ? (
                   <a
                     href={toHref(currentEvent.eventUrl)}
@@ -295,7 +295,7 @@ async function refreshAndLoad(id: number) {
                   currentEvent.eventName
                 )}
               </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-muted-foreground">
                 Added on {formatDate(currentEvent.dateCreated)}
               </p>
             </div>
@@ -310,7 +310,7 @@ async function refreshAndLoad(id: number) {
                 {hasAvailableGroupings ? "Available" : "Unavailable"}
               </span>
               <span
-                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
+                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground"
                 title="Groups found"
               >
                 Groups: {groupsFound}
@@ -345,7 +345,7 @@ async function refreshAndLoad(id: number) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 h-7 w-7"
+                className="text-muted-foreground hover:text-foreground h-7 w-7"
                 onClick={toggleExpanded}
               >
                 {isExpanded ? (
@@ -365,14 +365,14 @@ async function refreshAndLoad(id: number) {
                 {currentEvent.groupings.map((grouping) => (
                   <div
                     key={grouping.id}
-                    className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden w-[280px] flex-shrink-0"
+                    className="border border-border rounded-lg overflow-hidden w-[280px] flex-shrink-0"
                   >
                     {editingGroupingId === grouping.id ? (
                       // Edit form
                       <div className="p-3 space-y-3">
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-xs text-gray-500 dark:text-gray-400">Section</label>
+                            <label className="text-xs text-muted-foreground">Section</label>
                             <Select
                               value={editFormData.section}
                               onValueChange={(value) => 
@@ -444,7 +444,7 @@ async function refreshAndLoad(id: number) {
                       // Display view
                       <div className="p-3">
                         <div className="mb-3">
-                          <h4 className="font-medium text-gray-900 dark:text-gray-100 text-sm">
+                          <h4 className="font-medium text-card-foreground text-sm">
                             {grouping.section} Section, Row {grouping.row}
                           </h4>
                         </div>
@@ -452,7 +452,7 @@ async function refreshAndLoad(id: number) {
                         <div className="grid grid-cols-2 gap-x-2 text-xs text-gray-500 dark:text-gray-400 mb-3">
                           <div>
                             <p className="font-semibold">Price</p>
-                            <p className="text-sm font-medium dark:text-gray-300"> {grouping.price != null ? `$${grouping.price.toFixed(2)}` : '—'} </p>
+                            <p className="text-sm font-medium text-foreground"> {grouping.price != null ? `$${grouping.price.toFixed(2)}` : '—'} </p>
                           </div>
                           <div>
                             <p className="font-semibold">Group Size</p>
@@ -506,7 +506,7 @@ async function refreshAndLoad(id: number) {
                 'Are you sure you want to delete this grouping?'
               }
             </p>
-            <p className="text-center text-gray-500 dark:text-gray-400 text-sm mt-2">
+            <p className="text-center text-muted-foreground text-sm mt-2">
               This action cannot be undone.
             </p>
           </div>

@@ -159,6 +159,7 @@ export class XMLFetcherService {
     xmlText: string,
     eventId: number,
     eventName: string,
+    screenId: number,
     eventRow?: string,
     eventSection?: string,
     eventGroupSize?: number,
@@ -203,7 +204,15 @@ export class XMLFetcherService {
     this.logger.debug(`Raw seats parsed: ${seatData.length}`);
 
     let validGroupCount = 0;
-    const SeatMapping = await this.prisma.seatMapping.findMany();
+    const SeatMapping = await this.prisma.seatMapping.findMany({ where: { screen_id: screenId } });
+
+    // Build quick metadata lookup for seat_no → { row, section }
+    const seatMeta = new Map<number, { row?: string; section?: string }>();
+    for (const m of SeatMapping as any[]) {
+      if (m && typeof m.seat_no === 'number') {
+        seatMeta.set(m.seat_no, { row: (m as any).row, section: (m as any).section });
+      }
+    }
 
     if (eventRow && eventSection) {
       seatData.forEach((seat) => {
@@ -221,9 +230,22 @@ export class XMLFetcherService {
           return;
         }
 
-        if (eventSection && mapping?.section?.toLowerCase().trim() !== eventSection.toLowerCase().trim()) {
-          this.logger.debug(`Seat ${seat.seatNo} rejected: section mismatch (found ${mapping?.section}, expected ${eventSection})`);
-          return;
+        if (eventSection) {
+          const req = eventSection.toLowerCase().trim();
+          const got = (mapping?.section || '').toLowerCase().trim();
+
+          const matchesSection = (() => {
+            if (!got) return false;
+            if (req === 'center') return got === 'center';
+            if (req === 'left' || req === 'right') return got === 'left' || got === 'right';
+            if (req === 'box') return got === 'box';
+            return got === req; // fallback: strict match
+          })();
+
+          if (!matchesSection) {
+            this.logger.debug(`Seat ${seat.seatNo} rejected: section mismatch (found ${mapping?.section}, expected ${eventSection} with L/R interchangeable)`);
+            return;
+          }
         }
         if (!mapping || !mapping.row) {
           this.logger.debug(`Seat ${seat.seatNo} rejected: no seat mapping or row`);
@@ -239,31 +261,62 @@ export class XMLFetcherService {
 
     const validBeforeGroup = seatData.filter((s) => s.isvalid).length;
     this.logger.debug(`Seats valid before group filtering: ${validBeforeGroup}`);
-
     if (eventGroupSize && eventGroupSize > 1) {
+      // Reset groupChecked flags
       seatData.forEach((s) => (s.groupChecked = false));
+
+      // Build a set of valid seat numbers for O(1) membership tests
+      const validSet = new Set<number>(seatData.filter((s) => s.isvalid).map((s) => s.seatNo));
+
+      // Helper to check if two seats share the same row & section (based on DB mapping)
+      const sameRowSection = (a: number, b: number): boolean => {
+        const ma = seatMeta.get(a);
+        const mb = seatMeta.get(b);
+        if (!ma || !mb) return false;
+        const ra = (ma.row || '').trim().toUpperCase();
+        const rb = (mb.row || '').trim().toUpperCase();
+        const sa = (ma.section || '').trim().toLowerCase();
+        const sb = (mb.section || '').trim().toLowerCase();
+        return ra === rb && sa === sb;
+      };
+
+      // Strict adjacency: only seat_no-1 and seat_no+1 within the same row & section
+      const getNeighbors = (n: number): number[] => {
+        const out: number[] = [];
+        const left = n - 1;
+        const right = n + 1;
+        if (validSet.has(left) && sameRowSection(n, left)) out.push(left);
+        if (validSet.has(right) && sameRowSection(n, right)) out.push(right);
+        return out;
+      };
+
+      validGroupCount = 0;
       for (const seat of seatData) {
         if (!seat.isvalid || seat.groupChecked) continue;
-        validGroupCount++;
-        const group = [seat];
+        // BFS to collect the contiguous block by strict neighbors
+        const group: typeof seatData = [] as any;
+        const queue: number[] = [];
         seat.groupChecked = true;
-        const queue = [seat];
+        queue.push(seat.seatNo);
+
         while (queue.length > 0) {
-          const current = queue.shift();
+          const currentNo = queue.shift()!;
+          const current = seatData.find((s) => s.seatNo === currentNo);
           if (!current) continue;
-          const mapping = SeatMapping.find((m) => m.seat_no === current.seatNo);
-          if (!mapping || !mapping.adjacent_seats) continue;
-          const adjacentSeatNos = mapping.adjacent_seats;
-          for (const adjacentNo of adjacentSeatNos) {
-            const adjacentSeat = seatData.find((s) => s.seatNo === adjacentNo && s.isvalid && !s.groupChecked);
-            if (adjacentSeat) {
-              adjacentSeat.groupChecked = true;
-              group.push(adjacentSeat);
-              queue.push(adjacentSeat);
+          group.push(current);
+          for (const nb of getNeighbors(currentNo)) {
+            const nbSeat = seatData.find((s) => s.seatNo === nb);
+            if (nbSeat && nbSeat.isvalid && !nbSeat.groupChecked) {
+              nbSeat.groupChecked = true;
+              queue.push(nb);
             }
           }
         }
-        if (group.length < eventGroupSize) {
+
+        if (group.length >= eventGroupSize) {
+          validGroupCount++;
+        } else {
+          // Not enough contiguous seats; mark them invalid so they don't count later
           group.forEach((s) => (s.isvalid = false));
         }
       }
@@ -291,7 +344,7 @@ export class XMLFetcherService {
   }
 
   private isRowInFrontOrEqual(seatRow: string, targetRow: string): boolean {
-    const rowOrder = ['AAA', 'BBB', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'];
+    const rowOrder = ['AAA', 'BBB', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'SS', 'TT', 'UU', 'VV', 'WW', 'YY', 'ZZ'];
     const normalize = (r: string) => r.trim().toUpperCase();
     const seatIndex = rowOrder.indexOf(normalize(seatRow));
     const targetIndex = rowOrder.indexOf(normalize(targetRow));
@@ -324,6 +377,7 @@ export class XMLFetcherService {
         xmlText,
         eventId,
         name,
+        screenId,
         row,
         section,
         groupSize,

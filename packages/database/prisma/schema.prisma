@@ -47,6 +47,8 @@ model Event {
 
   seats      EventSeat[]
   zonePrices EventZonePrice[]
+
+  userTag    String?
 }
 
 model EventSeat {
@@ -71,11 +73,14 @@ model EventZonePrice {
 }
 
 model SeatMapping {
-  seat_no        Int    @id @unique // Primary key, unique seat number
-  row            String // The row the seat is in
-  adjacent_seats Int[]  // List of adjacent seat_no values
-  section        String? // The section a seat is in
+  screen_id Int
+  seat_no   Int
+  row       String? // The row the seat is in
+  section   String  // The section a seat is in (canonical: left|center|right|Box|UNKNOWN)
 
+  @@id([screen_id, seat_no])
+  @@index([section])
+  @@index([row])
   @@map("SeatMapping")
 }
 

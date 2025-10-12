@@ -1,0 +1,29 @@
+{
+  "name": "ticket-check-launcher",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "dependencies": {
+    "electron": "^30.0.0",
+    "tree-kill": "^1.2.2",
+    "wait-on": "^7.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ticketcheck.launcher",
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.productivity"
+    },
+    "files": [
+      "main.js",
+      "iconTemplate.png"
+    ]
+  }
+}

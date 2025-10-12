@@ -2,7 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import NotificationsPanel from "./NotificationsPanel";
-import { ThemeToggle } from "./ThemeToggle";
+import { SettingSelect } from "./SettingSelect";
 import { Event } from "@/types";
 import { API_URL } from "@/types/constants";
 
@@ -80,14 +80,14 @@ export default function AppHeader({
   // }, [events, isRefreshing]);
 
   return (
-    <header className="bg-white dark:bg-gray-900 shadow sticky top-0 z-10">
+    <header className="bg-brand-black text-secondary-foreground shadow sticky top-0 z-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">
+          <h1 className="text-2xl font-semibold text-brand-anti">
             Ticket Checker
           </h1>
           <div className="flex items-center space-x-3">
-            <span className="text-sm text-gray-500 dark:text-gray-400">
+            <span className="text-sm text-muted-foreground">
               Last updated: {isRefreshing ? "Updating..." : lastUpdated}
             </span>
             <Button
@@ -98,7 +98,7 @@ export default function AppHeader({
               className="rounded-full"
             >
               <RefreshCw
-                className={`h-5 w-5 text-gray-500 dark:text-gray-400 ${
+                className={`h-5 w-5 text-muted-foreground ${
                   isRefreshing ? "animate-spin" : ""
                 }`}
               />
@@ -121,7 +121,7 @@ export default function AppHeader({
               onRefresh={onRefresh}
             />
             
-            <ThemeToggle />
+            <SettingSelect />
           </div>
         </div>
       </div>

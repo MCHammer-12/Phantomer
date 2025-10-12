@@ -17,7 +17,7 @@ export function ChipInput({
   return (
     <div className="w-full">
       {selectedValue ? null : (
-        <div className="mb-2 text-sm text-muted-foreground dark:text-gray-400">{placeholder}</div>
+        <div className="mb-2 text-sm text-muted-foreground">{placeholder}</div>
       )}
       <div className="flex flex-wrap gap-2">
         {options.map((option) => (
@@ -26,8 +26,8 @@ export function ChipInput({
             type="button"
             className={`px-3 py-2 rounded-md text-sm font-medium transition-colors 
               ${selectedValue === option
-                ? "bg-blue-600 text-white dark:bg-blue-700 dark:text-white"
-                : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-foreground hover:bg-muted/80"
               }`}
             onClick={() => onChange(option)}
           >
@@ -60,7 +60,7 @@ export function NumberChipInput({
   return (
     <div className="w-full">
       {selectedValue ? null : (
-        <div className="mb-2 text-sm text-muted-foreground dark:text-gray-400">{placeholder}</div>
+        <div className="mb-2 text-sm text-muted-foreground">{placeholder}</div>
       )}
       <div className="flex flex-wrap gap-2">
         {options.map((option) => (
@@ -69,8 +69,8 @@ export function NumberChipInput({
             type="button"
             className={`px-3 py-2 rounded-md text-sm font-medium text-center transition-colors 
               ${selectedValue === option
-                ? "bg-blue-600 text-white dark:bg-blue-700 dark:text-white"
-                : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-foreground hover:bg-muted/80"
               }`}
             onClick={() => onChange(option)}
           >
@@ -109,7 +109,7 @@ export function TagChipInput({
   return (
     <div className="w-full">
       {selectedValues.length === 0 && (
-        <div className="mb-2 text-sm text-muted-foreground dark:text-gray-400">{placeholder}</div>
+        <div className="mb-2 text-sm text-muted-foreground">{placeholder}</div>
       )}
       <div className="flex flex-wrap gap-2">
         {options.map((option) => (
@@ -118,8 +118,8 @@ export function TagChipInput({
             type="button"
             className={`px-3 py-2 rounded-md text-sm font-medium transition-colors 
               ${selectedValues.includes(option)
-                ? "bg-blue-600 text-white dark:bg-blue-700 dark:text-white"
-                : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-foreground hover:bg-muted/80"
               }`}
             onClick={() => toggleOption(option)}
           >

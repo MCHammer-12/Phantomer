@@ -1,12 +1,10 @@
 import { useState, useEffect } from "react";
-import { getEvents } from "@/services/api";
 import AppHeader from "@/components/AppHeader";
 import EventForm from "@/components/EventForm";
 import SortFilterBar from "@/components/SortFilterBar";
 import EventCard from "@/components/EventCard";
 import { Button } from "@/components/ui/button";
 import { Event, FilterOption, SortOption } from "@/types";
-import { queryClient } from "@/lib/queryClient";
 import { FileText } from "lucide-react";
 import { API_URL } from '@/types/constants';
 import { refreshAllEvents } from "@/services/api";
@@ -40,6 +38,55 @@ export default function Dashboard() {
 
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
+  // --- User management state (stored locally) ---
+  const [users, setUsers] = useState<string[]>([]);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [newUserName, setNewUserName] = useState<string>("");
+
+  const USERS_KEY = "tc_users";
+  const CURRENT_USER_KEY = "tc_current_user";
+
+  const loadUsers = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(USERS_KEY) || "[]");
+      if (Array.isArray(saved)) setUsers(saved);
+      const cur = localStorage.getItem(CURRENT_USER_KEY);
+      if (cur) setSelectedUser(cur);
+    } catch {
+      // ignore
+    }
+  };
+
+  const saveUsers = (list: string[]) => {
+    setUsers(list);
+    localStorage.setItem(USERS_KEY, JSON.stringify(list));
+  };
+
+  const addUser = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (users.includes(trimmed)) return;
+    const next = [...users, trimmed];
+    saveUsers(next);
+    setNewUserName("");
+  };
+
+  const removeUser = (name: string) => {
+    const next = users.filter(u => u !== name);
+    saveUsers(next);
+    if (selectedUser === name) {
+      setSelectedUser(null);
+      localStorage.removeItem(CURRENT_USER_KEY);
+    }
+  };
+
+  const chooseUser = async (name: string) => {
+    setSelectedUser(name);
+    localStorage.setItem(CURRENT_USER_KEY, name);
+    await fetchEvents(name);
+    await fetchLastUpdated();
+  };
+
 const fetchLastUpdated = async () => {
   console.log("Calling fetchLastUpdated()");
   try {
@@ -61,29 +108,36 @@ const fetchLastUpdated = async () => {
 };
 
 
-  // Fetch events and update state
-  const fetchEvents = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const eventsArray = await getEvents();
-      setEvents(eventsArray);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+// Fetch events and update state
+const fetchEvents = async (userTag?: string) => {
+  setIsLoading(true);
+  setError(null);
+  try {
+    const url = userTag
+      ? `${API_URL}/events/all?userTag=${encodeURIComponent(userTag)}`
+      : `${API_URL}/events/all`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Failed to fetch events: ${res.status}`);
+    const eventsArray = await res.json();
+    setEvents(eventsArray);
+  } catch (err) {
+    setError((err as Error).message);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   // add useeffect to call async fetch function
-    useEffect(() => {
-      console.log("Dashboard useEffect initializing…");
-      const initialize = async () => {
-        await fetchEvents();
-        await fetchLastUpdated();
-      };
-      initialize();
-    }, []);
+  useEffect(() => {
+    console.log("Dashboard useEffect initializing…");
+    loadUsers();
+    const initialize = async () => {
+      const cur = localStorage.getItem(CURRENT_USER_KEY) || undefined;
+      await fetchEvents(cur);
+      await fetchLastUpdated();
+    };
+    initialize();
+  }, []);
 
   const handleRefresh = async () => {
     setIsLoading(true);
@@ -93,7 +147,7 @@ const fetchLastUpdated = async () => {
 
     try {
       const result = await refreshAllEvents(); // returns { errorsOccurred: boolean }
-      await fetchEvents();
+      await fetchEvents(selectedUser || undefined);
       await fetchLastUpdated();
 
       if (result.errorsOccurred) {
@@ -148,12 +202,12 @@ const fetchLastUpdated = async () => {
 
   // Empty state component
   const EmptyState = () => (
-    <div className="bg-white dark:bg-neutral-800 shadow rounded-lg p-8 text-center">
-      <FileText className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-      <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+    <div className="bg-card text-card-foreground border border-border shadow rounded-lg p-8 text-center">
+      <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+      <h3 className="text-lg font-medium text-card-foreground mb-2">
         No events being monitored
       </h3>
-      <p className="text-gray-500 dark:text-gray-400 mb-4">
+      <p className="text-muted-foreground mb-4">
         Add your first event using the form to start monitoring ticket
         availability.
       </p>
@@ -170,16 +224,53 @@ const fetchLastUpdated = async () => {
   // Error state component
   const ErrorState = ({ message }: { message: string }) => (
     <div className="bg-white dark:bg-neutral-800 shadow rounded-lg p-8 text-center">
-      <h3 className="text-lg font-medium text-red-600 dark:text-red-400 mb-2">Welcome to Ticket Checker</h3>
-      {/* <p className="text-gray-500 dark:text-gray-400 mb-4">{message}</p> */}
-      <Button onClick={handleRefresh} className="dark:bg-blue-700 dark:hover:bg-blue-600">Load Events</Button>
+      <h3 className="text-lg font-medium text-white mb-2">Select User</h3>
+
+      {/* Existing users */}
+      <div className="flex flex-wrap gap-2 justify-center mb-4">
+        {users.length === 0 ? (
+          <span className="text-muted-foreground">No users yet — add one below.</span>
+        ) : (
+          users.map((u) => (
+            <Button
+              key={u}
+              onClick={() => chooseUser(u)}
+              variant="secondary"
+              className="dark:bg-blue-700 dark:hover:bg-blue-600"
+            >
+              {u}
+            </Button>
+          ))
+        )}
+      </div>
+
+      {/* Add user inline */}
+      <div className="flex items-center justify-center gap-2">
+        <input
+          value={newUserName}
+          onChange={(e) => setNewUserName(e.target.value)}
+          placeholder="Add user (e.g., Michael)"
+          className="px-3 py-2 rounded-md bg-neutral-700 text-white placeholder:text-neutral-400 focus:outline-none"
+        />
+        <Button
+          onClick={() => addUser(newUserName)}
+          className="dark:bg-blue-700 dark:hover:bg-blue-600"
+        >
+          Add
+        </Button>
+      </div>
+
+      {/* Fallback to plain refresh */}
+      <div className="mt-4">
+        <Button onClick={handleRefresh} className="dark:bg-blue-700 dark:hover:bg-blue-600">Load Events</Button>
+      </div>
     </div>
   );
 
-  console.log("Rendering Dashboard — passing lastUpdated:", lastUpdated);
+  console.log("Rendering Dashboard — passing lastUpdated:", lastUpdated, "selectedUser:", selectedUser);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-brand-outer">
       <AppHeader 
         onRefresh={handleRefresh} 
         isRefreshing={isLoading} 
@@ -191,9 +282,11 @@ const fetchLastUpdated = async () => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-nowrap gap-6 overflow-x-auto">
-          <EventForm onSuccess={fetchEvents} />
+          <EventForm onSuccess={() => fetchEvents(selectedUser || undefined)} currentUser={selectedUser || undefined} />
 
           <div className="flex-1 min-w-0">
+            {/* Settings panel for managing users */}
+
             <SortFilterBar
               sortOptions={sortOptions}
               filterOptions={filterOptions}

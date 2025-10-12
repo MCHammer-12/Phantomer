@@ -3,48 +3,48 @@
 @tailwind utilities;
 
 :root {
-      --background: 0 0% 100%;
---foreground: 20 14.3% 4.1%;
---muted: 60 4.8% 95.9%;
---muted-foreground: 25 5.3% 44.7%;
---popover: 0 0% 100%;
---popover-foreground: 20 14.3% 4.1%;
---card: 0 0% 100%;
---card-foreground: 20 14.3% 4.1%;
---border: 20 5.9% 90%;
---input: 20 5.9% 90%;
---primary: 207 90% 54%;
---primary-foreground: 211 100% 99%;
---secondary: 60 4.8% 95.9%;
---secondary-foreground: 24 9.8% 10%;
---accent: 60 4.8% 95.9%;
---accent-foreground: 24 9.8% 10%;
---destructive: 0 84.2% 60.2%;
---destructive-foreground: 60 9.1% 97.8%;
---ring: 20 14.3% 4.1%;
---radius: 0.5rem;
-  }
+  --background: 240 7.14% 94.51%;      /* #F0F0F2 Anti-flash white */
+  --foreground: 0 0% 0%;               /* #000000 Black */
+  --muted: 217.5 6.40% 49.02%;         /* #757B85 Slate gray */
+  --muted-foreground: 0 0% 100%;       /* White on slate */
+  --popover: 240 7.14% 94.51%;         /* same as background */
+  --popover-foreground: 0 0% 0%;
+  --card: 217.5 6.40% 49.02%;          /* Slate gray as surface */
+  --card-foreground: 0 0% 100%;        /* White text on slate */
+  --border: 217.5 6.40% 49.02%;        /* Slate */
+  --input: 217.5 6.40% 49.02%;         /* Slate */
+  --primary: 210 55.56% 21.18%;        /* #183654 Prussian blue */
+  --primary-foreground: 0 0% 100%;     /* White */
+  --secondary: 206.25 9.76% 32.16%;    /* #4A535A Outer space */
+  --secondary-foreground: 240 7.14% 94.51%;
+  --accent: 210 55.56% 21.18%;         /* Use prussian as accent */
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72.22% 50.59%;      /* #DC2626 Red */
+  --destructive-foreground: 0 0% 100%;
+  --ring: 210 55.56% 21.18%;           /* prussian */
+  --radius: 0.5rem;
+}
   .dark {
-      --background: 240 10% 3.9%;
---foreground: 0 0% 98%;
---muted: 240 3.7% 15.9%;
---muted-foreground: 240 5% 64.9%;
---popover: 240 10% 3.9%;
---popover-foreground: 0 0% 98%;
---card: 240 10% 3.9%;
---card-foreground: 0 0% 98%;
---border: 240 3.7% 15.9%;
---input: 240 3.7% 15.9%;
---primary: 207 90% 54%;
---primary-foreground: 211 100% 99%;
---secondary: 240 3.7% 15.9%;
---secondary-foreground: 0 0% 98%;
---accent: 240 3.7% 15.9%;
---accent-foreground: 0 0% 98%;
---destructive: 0 62.8% 30.6%;
---destructive-foreground: 0 0% 98%;
---ring: 240 4.9% 83.9%;
---radius: 0.5rem;
+    --background: 206.25 9.76% 32.16%;    /* #4A535A Outer space */
+    --foreground: 240 7.14% 94.51%;       /* #F0F0F2 Anti-flash white */
+    --muted: 210 55.56% 21.18%;           /* #183654 Prussian blue */
+    --muted-foreground: 240 7.14% 94.51%;
+    --popover: 206.25 9.76% 32.16%;
+    --popover-foreground: 240 7.14% 94.51%;
+    --card: 210 55.56% 21.18%;            /* Prussian as cards */
+    --card-foreground: 240 7.14% 94.51%;
+    --border: 210 55.56% 21.18%;
+    --input: 210 55.56% 21.18%;
+    --primary: 0 0% 100%;                 /* White primary on dark */
+    --primary-foreground: 210 55.56% 21.18%;
+    --secondary: 217.5 6.40% 49.02%;      /* Slate as secondary */
+    --secondary-foreground: 0 0% 0%;      /* Black text on slate is too low contrast; keep light text */
+    --accent: 217.5 6.40% 49.02%;
+    --accent-foreground: 240 7.14% 94.51%;
+    --destructive: 0 72.22% 50.59%;
+    --destructive-foreground: 0 0% 100%;
+    --ring: 240 7.14% 94.51%;
+    --radius: 0.5rem;
   }
 
 @layer base {

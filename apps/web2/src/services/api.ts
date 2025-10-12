@@ -15,6 +15,7 @@ export async function createEvent(data: EventFormData): Promise<Event> {
       section: data.section,
       groupSize: data.groupSize,
       expectedPrice: data.price,
+      userTag: (data as any).userTag ?? null,
     }),
   });
   if (!res.ok) {
@@ -24,8 +25,11 @@ export async function createEvent(data: EventFormData): Promise<Event> {
   return payload.event;
 }
 
-export async function getEvents(): Promise<Event[]> {
-  const res = await fetch(`${API_BASE_URL}/all`, {
+export async function getEvents(userTag?: string): Promise<Event[]> {
+  const url = userTag
+    ? `${API_BASE_URL}/all?userTag=${encodeURIComponent(userTag)}`
+    : `${API_BASE_URL}/all`;
+  const res = await fetch(url, {
     method: "GET",
     headers: { "Content-Type": "application/json" },
   });
