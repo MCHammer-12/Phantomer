@@ -93,30 +93,46 @@ export class XMLFetcherService {
   }
 
   private async fetchXmlViaScrapfly(url: string, signal: AbortSignal): Promise<string> {
+    this.logger.log(`[Fetcher] Starting fetchXmlViaScrapfly for URL=${url}`);
+    this.logger.log(`[Fetcher] Scrapfly enabled=${this.SCRAPFLY_ENABLED} keyPresent=${!!this.SCRAPFLY_KEY}`);
     if (!this.SCRAPFLY_ENABLED || !this.SCRAPFLY_KEY) {
+      this.logger.log(`[Fetcher] Using Node direct fetch → ${url}`);
       const resp = await fetch(url, {
         signal,
         headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/xml,text/xml,*/*' },
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      this.logger.log(`[Fetcher] Node direct fetch completed status=${resp.status}`);
       return await resp.text();
     }
 
     const sp1 = new URLSearchParams();
     sp1.set('url', url);
     sp1.set('key', this.SCRAPFLY_KEY);
-    sp1.set('proxy_pool', 'public_datacenter_pool');
-    sp1.set('retry', 'false');
+    sp1.set('proxy_pool', 'public_residential_pool');
+    sp1.set('retry', 'true');
     sp1.set('country', 'us');
     sp1.set('proxified_response', 'true');
     sp1.set('cache', 'true');
     sp1.set('cache_ttl', '300');
     sp1.set('cost_budget', this.SCRAPFLY_COST_BUDGET_CHEAP);
-    let resp = await fetch(`https://api.scrapfly.io/scrape?${sp1.toString()}`, {
+
+    this.logger.log(`[Fetcher] Scrapfly CHEAP-tier request starting…`);
+
+    const cheapUrl = `https://api.scrapfly.io/scrape?${sp1.toString()}`;
+    this.logger.log(`[Fetcher] Scrapfly CHEAP-tier URL=${cheapUrl}`);
+
+    const cheapStart = Date.now();
+    let resp = await fetch(cheapUrl, {
       method: 'GET',
       signal,
       headers: { Accept: 'application/xml,text/xml,*/*' },
     });
+this.logger.log(
+  `[Fetcher] Scrapfly CHEAP-tier response status=${resp.status} elapsed=${Date.now() - cheapStart}ms`
+);
+    this.logger.log(`[Fetcher] Scrapfly CHEAP-tier response status=${resp.status}`);
+
     if (resp.ok) return await resp.text();
 
     if (!this.SCRAPFLY_ESCALATE) {
@@ -129,17 +145,20 @@ export class XMLFetcherService {
     sp2.set('key', this.SCRAPFLY_KEY);
     sp2.set('asp', 'true');
     sp2.set('retry', 'true');
+    sp2.set('proxy_pool', 'public_residential_pool');
     sp2.set('country', 'us');
     sp2.set('proxified_response', 'true');
     sp2.set('session', 'ticketcheck-arttix');
     sp2.set('session_sticky_proxy', 'true');
     sp2.set('cost_budget', this.SCRAPFLY_COST_BUDGET_ASP);
 
+    this.logger.log(`[Fetcher] Scrapfly ASP-tier request starting…`);
     resp = await fetch(`https://api.scrapfly.io/scrape?${sp2.toString()}`, {
       method: 'GET',
       signal,
       headers: { Accept: 'application/xml,text/xml,*/*' },
     });
+    this.logger.log(`[Fetcher] Scrapfly ASP-tier response status=${resp.status}`);
     if (!resp.ok) {
       const cost = resp.headers.get('X-Scrapfly-Api-Cost');
       throw new Error(`Scrapfly ASP-tier failed (cost=${cost || '?'}) HTTP ${resp.status}`);
@@ -148,12 +167,21 @@ export class XMLFetcherService {
   }
 
   private async fetchXml(url: string, signal: AbortSignal): Promise<string> {
+    this.logger.log(`[Fetcher] fetchXml request for URL=${url}`);
+
     const cached = this.getCached(url);
-    if (cached) return cached;
+    if (cached) {
+      this.logger.log(`[Fetcher] Cache HIT for URL=${url}`);
+      return cached;
+    }
+
+    this.logger.log(`[Fetcher] Cache MISS for URL=${url}`);
+
     const body = await this.fetchOncePerUrl(url, (u) => this.fetchXmlViaScrapfly(u, signal));
     this.setCached(url, body, 60_000);
+
     return body;
-  }
+}
 
   private async processXmlForEvent(
     xmlText: string,
